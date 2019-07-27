@@ -157,11 +157,13 @@ use crate::frame::{Headers, Pseudo, Reason, Settings, StreamId};
 use crate::proto;
 
 use bytes::{Bytes, IntoBuf};
-use futures::{Async, Future, Poll, Stream, try_ready};
+use futures::{Stream, ready};
+use std::future::Future;
+use std::task::{Context, Poll};
+use std::pin::Pin;
 use http::{uri, HeaderMap, Request, Response, Method, Version};
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::io::WriteAll;
-
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use std::io;
 use std::fmt;
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -184,7 +186,7 @@ use std::usize;
 #[must_use = "futures do nothing unless polled"]
 pub struct Handshake<T, B = Bytes> {
     builder: Builder,
-    inner: WriteAll<T, &'static [u8]>,
+    inner: Pin<Box<dyn Future<Output=io::Result<T>>>>,
     _marker: PhantomData<fn(B)>,
 }
 
@@ -248,7 +250,7 @@ pub struct ReadySendRequest<B: IntoBuf> {
 /// ```
 /// # use futures::{Future, Stream};
 /// # use futures::future::Executor;
-/// # use tokio_io::*;
+/// # use tokio::io::*;
 /// # use h2::client;
 /// # use h2::client::*;
 /// #
@@ -335,7 +337,7 @@ pub struct PushPromises {
 /// # Examples
 ///
 /// ```
-/// # use tokio_io::*;
+/// # use tokio::io::*;
 /// # use h2::client::*;
 /// #
 /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -384,8 +386,8 @@ pub(crate) struct Peer;
 
 impl<B> SendRequest<B>
 where
-    B: IntoBuf,
-    B::Buf: 'static,
+    B: IntoBuf + Unpin,
+    B::Buf: Unpin + 'static,
 {
     /// Returns `Ready` when the connection can initialize a new HTTP/2.0
     /// stream.
@@ -397,10 +399,10 @@ where
     /// See [module] level docs for more details.
     ///
     /// [module]: index.html
-    pub fn poll_ready(&mut self) -> Poll<(), crate::Error> {
-        try_ready!(self.inner.poll_pending_open(self.pending.as_ref()));
+    pub fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), crate::Error>> {
+        ready!(self.inner.poll_pending_open(cx, self.pending.as_ref()))?;
         self.pending = None;
-        Ok(().into())
+        Poll::Ready(Ok(()))
     }
 
     /// Consumes `self`, returning a future that returns `self` back once it is
@@ -634,21 +636,21 @@ where
 // ===== impl ReadySendRequest =====
 
 impl<B> Future for ReadySendRequest<B>
-where B: IntoBuf,
-      B::Buf: 'static,
+where B: IntoBuf + Unpin,
+      B::Buf: Unpin + 'static,
 {
-    type Item = SendRequest<B>;
-    type Error = crate::Error;
+    type Output = Result<SendRequest<B>, crate::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.inner {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::get_mut(self);
+        match pinned.inner {
             Some(ref mut send_request) => {
-                let _ = try_ready!(send_request.poll_ready());
+                let _ = ready!(send_request.poll_ready(cx))?;
             }
             None => panic!("called `poll` after future completed"),
         }
 
-        Ok(self.inner.take().unwrap().into())
+        Poll::Ready(Ok(pinned.inner.take().unwrap()))
     }
 }
 
@@ -663,7 +665,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -704,7 +706,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -738,7 +740,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -771,7 +773,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -810,7 +812,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -858,7 +860,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -898,7 +900,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -942,7 +944,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -986,7 +988,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// # use std::time::Duration;
     /// #
@@ -1023,7 +1025,7 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// # use std::time::Duration;
     /// #
@@ -1078,7 +1080,7 @@ impl Builder {
     /// Basic usage:
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -1098,7 +1100,7 @@ impl Builder {
     /// type will be `&'static [u8]`.
     ///
     /// ```
-    /// # use tokio_io::*;
+    /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
     /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
@@ -1115,9 +1117,9 @@ impl Builder {
     /// ```
     pub fn handshake<T, B>(&self, io: T) -> Handshake<T, B>
     where
-        T: AsyncRead + AsyncWrite,
-        B: IntoBuf,
-        B::Buf: 'static,
+        T: AsyncRead + AsyncWrite + Unpin + 'static,
+        B: IntoBuf + Unpin,
+        B::Buf: Unpin + 'static,
     {
         Connection::handshake2(io, self.clone())
     }
@@ -1150,7 +1152,7 @@ impl Default for Builder {
 ///
 /// ```
 /// # use futures::*;
-/// # use tokio_io::*;
+/// # use tokio::io::*;
 /// # use h2::client;
 /// # use h2::client::*;
 /// #
@@ -1169,7 +1171,7 @@ impl Default for Builder {
 /// # pub fn main() {}
 /// ```
 pub fn handshake<T>(io: T) -> Handshake<T, Bytes>
-where T: AsyncRead + AsyncWrite,
+where T: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     Builder::new().handshake(io)
 }
@@ -1178,16 +1180,20 @@ where T: AsyncRead + AsyncWrite,
 
 impl<T, B> Connection<T, B>
 where
-    T: AsyncRead + AsyncWrite,
-    B: IntoBuf,
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
+    B: IntoBuf + Unpin,
+    B::Buf: Unpin,
 {
-    fn handshake2(io: T, builder: Builder) -> Handshake<T, B> {
-        use tokio_io::io;
-
+    fn handshake2(mut io: T, builder: Builder) -> Handshake<T, B> {
         log::debug!("binding client connection");
 
         let msg: &'static [u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-        let handshake = io::write_all(io, msg);
+        let handshake = Box::pin(async move {
+            match io.write_all(msg).await {
+                Ok(_) => Ok(io),
+                Err(e) => Err(e),
+            }
+        });
 
         Handshake {
             builder,
@@ -1232,15 +1238,16 @@ where
 
 impl<T, B> Future for Connection<T, B>
 where
-    T: AsyncRead + AsyncWrite,
-    B: IntoBuf,
+    T: AsyncRead + AsyncWrite + Unpin,
+    B: IntoBuf + Unpin,
+    B::Buf: Unpin,
 {
-    type Item = ();
-    type Error = crate::Error;
+    type Output = Result<(), crate::Error>;
 
-    fn poll(&mut self) -> Poll<(), crate::Error> {
-        self.inner.maybe_close_connection_if_no_streams();
-        self.inner.poll().map_err(Into::into)
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::get_mut(self);
+        pinned.inner.maybe_close_connection_if_no_streams();
+        Pin::new(&mut pinned.inner).poll(cx).map_err(Into::into)
     }
 }
 
@@ -1260,43 +1267,42 @@ where
 
 impl<T, B> Future for Handshake<T, B>
 where
-    T: AsyncRead + AsyncWrite,
-    B: IntoBuf,
-    B::Buf: 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
+    B: IntoBuf + Unpin,
+    B::Buf: Unpin + 'static,
 {
-    type Item = (SendRequest<B>, Connection<T, B>);
-    type Error = crate::Error;
+    type Output = Result<(SendRequest<B>, Connection<T, B>), crate::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let res = self.inner.poll()
-            .map_err(crate::Error::from);
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::get_mut(self);
+        let res = Pin::new(&mut pinned.inner).poll(cx).map_err(crate::Error::from);
 
-        let (io, _) = try_ready!(res);
+        let io = ready!(res)?;
 
         log::debug!("client connection bound");
 
         // Create the codec
         let mut codec = Codec::new(io);
 
-        if let Some(max) = self.builder.settings.max_frame_size() {
+        if let Some(max) = pinned.builder.settings.max_frame_size() {
             codec.set_max_recv_frame_size(max as usize);
         }
 
-        if let Some(max) = self.builder.settings.max_header_list_size() {
+        if let Some(max) = pinned.builder.settings.max_header_list_size() {
             codec.set_max_recv_header_list_size(max as usize);
         }
 
         // Send initial settings frame
         codec
-            .buffer(self.builder.settings.clone().into())
+            .buffer(pinned.builder.settings.clone().into())
             .expect("invalid SETTINGS frame");
 
         let inner = proto::Connection::new(codec, proto::Config {
-            next_stream_id: self.builder.stream_id,
-            initial_max_send_streams: self.builder.initial_max_send_streams,
-            reset_stream_duration: self.builder.reset_stream_duration,
-            reset_stream_max: self.builder.reset_stream_max,
-            settings: self.builder.settings.clone(),
+            next_stream_id: pinned.builder.stream_id,
+            initial_max_send_streams: pinned.builder.initial_max_send_streams,
+            reset_stream_duration: pinned.builder.reset_stream_duration,
+            reset_stream_max: pinned.builder.reset_stream_max,
+            settings: pinned.builder.settings.clone(),
         });
         let send_request = SendRequest {
             inner: inner.streams().clone(),
@@ -1304,11 +1310,11 @@ where
         };
 
         let mut connection = Connection { inner };
-        if let Some(sz) = self.builder.initial_target_connection_window_size {
+        if let Some(sz) = pinned.builder.initial_target_connection_window_size {
             connection.set_target_window_size(sz);
         }
 
-        Ok(Async::Ready((send_request, connection)))
+        Poll::Ready(Ok((send_request, connection)))
     }
 }
 
@@ -1327,14 +1333,14 @@ where
 // ===== impl ResponseFuture =====
 
 impl Future for ResponseFuture {
-    type Item = Response<RecvStream>;
-    type Error = crate::Error;
+    type Output = Result<Response<RecvStream>, crate::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let (parts, _) = try_ready!(self.inner.poll_response()).into_parts();
-        let body = RecvStream::new(ReleaseCapacity::new(self.inner.clone()));
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::get_mut(self);
+        let (parts, _) = ready!(pinned.inner.poll_response(cx))?.into_parts();
+        let body = RecvStream::new(ReleaseCapacity::new(pinned.inner.clone()));
 
-        Ok(Response::from_parts(parts, body).into())
+        Poll::Ready(Ok(Response::from_parts(parts, body).into()))
     }
 }
 
@@ -1365,20 +1371,22 @@ impl ResponseFuture {
 // ===== impl PushPromises =====
 
 impl Stream for PushPromises {
-    type Item = PushPromise;
-    type Error = crate::Error;
+    type Item = Result<PushPromise, crate::Error>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match try_ready!(self.inner.poll_pushed()) {
-            Some((request, response)) => {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let pinned = Pin::get_mut(self);
+        match pinned.inner.poll_pushed(cx) {
+            Poll::Ready(Some(Ok((request, response)))) => {
                 let response = PushedResponseFuture {
                     inner: ResponseFuture {
                         inner: response, push_promise_consumed: false
                     }
                 };
-                Ok(Async::Ready(Some(PushPromise{request, response})))
-            }
-            None => Ok(Async::Ready(None)),
+                Poll::Ready(Some(Ok(PushPromise{request, response})))
+            },
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e.into()))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -1406,11 +1414,10 @@ impl PushPromise {
 // ===== impl PushedResponseFuture =====
 
 impl Future for PushedResponseFuture {
-    type Item = Response<RecvStream>;
-    type Error = crate::Error;
+    type Output = Result<Response<RecvStream>, crate::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.inner.poll()
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut Pin::get_mut(self).inner).poll(cx)
     }
 }
 

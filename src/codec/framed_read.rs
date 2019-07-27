@@ -4,21 +4,24 @@ use crate::frame::{DEFAULT_MAX_FRAME_SIZE, DEFAULT_SETTINGS_HEADER_TABLE_SIZE, M
 
 use crate::hpack;
 
-use futures::*;
+use futures::{ready, Stream};
 
 use bytes::BytesMut;
 
 use std::io;
 
-use tokio_io::AsyncRead;
-use tokio_io::codec::length_delimited;
+use tokio::io::AsyncRead;
+use tokio::codec::FramedRead as InnerFramedRead;
+use tokio::codec::LengthDelimitedCodec;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 // 16 MB "sane default" taken from golang http2
 const DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE: usize = 16 << 20;
 
 #[derive(Debug)]
 pub struct FramedRead<T> {
-    inner: length_delimited::FramedRead<T>,
+    inner: InnerFramedRead<T, LengthDelimitedCodec>,
 
     // hpack decoder state
     hpack: hpack::Decoder,
@@ -45,7 +48,7 @@ enum Continuable {
 }
 
 impl<T> FramedRead<T> {
-    pub fn new(inner: length_delimited::FramedRead<T>) -> FramedRead<T> {
+    pub fn new(inner: InnerFramedRead<T, LengthDelimitedCodec>) -> FramedRead<T> {
         FramedRead {
             inner: inner,
             hpack: hpack::Decoder::new(DEFAULT_SETTINGS_HEADER_TABLE_SIZE),
@@ -311,7 +314,7 @@ impl<T> FramedRead<T> {
     #[inline]
     pub fn set_max_frame_size(&mut self, val: usize) {
         assert!(DEFAULT_MAX_FRAME_SIZE as usize <= val && val <= MAX_MAX_FRAME_SIZE as usize);
-        self.inner.set_max_frame_length(val)
+        self.inner.decoder_mut().set_max_frame_length(val)
     }
 
     /// Update the max header list size setting.
@@ -323,30 +326,31 @@ impl<T> FramedRead<T> {
 
 impl<T> Stream for FramedRead<T>
 where
-    T: AsyncRead,
+    T: AsyncRead + Unpin,
 {
-    type Item = Frame;
-    type Error = RecvError;
+    type Item = Result<Frame, RecvError>;
 
-    fn poll(&mut self) -> Poll<Option<Frame>, Self::Error> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let pinned = Pin::get_mut(self);
         loop {
             log::trace!("poll");
-            let bytes = match try_ready!(self.inner.poll().map_err(map_err)) {
-                Some(bytes) => bytes,
-                None => return Ok(Async::Ready(None)),
+            let bytes = match ready!(Pin::new(&mut pinned.inner).poll_next(cx)) {
+                Some(Ok(bytes)) => bytes,
+                Some(Err(e)) => return Poll::Ready(Some(Err(map_err(e)))),
+                None => return Poll::Ready(None),
             };
 
             log::trace!("poll; bytes={}B", bytes.len());
-            if let Some(frame) = self.decode_frame(bytes)? {
+            if let Some(frame) = pinned.decode_frame(bytes)? {
                 log::debug!("received; frame={:?}", frame);
-                return Ok(Async::Ready(Some(frame)));
+                return Poll::Ready(Some(Ok(frame)));
             }
         }
     }
 }
 
 fn map_err(err: io::Error) -> RecvError {
-    use tokio_io::codec::length_delimited::FrameTooBig;
+    use tokio::codec::length_delimited::FrameTooBig;
 
     if let io::ErrorKind::InvalidData = err.kind() {
         if let Some(custom) = err.get_ref() {

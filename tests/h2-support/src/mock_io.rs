@@ -379,7 +379,7 @@ mod tokio {
     use futures::{Future, Stream, Poll, Async};
     use futures::sync::mpsc;
     use futures::task::{self, Task};
-    use tokio_io::{AsyncRead, AsyncWrite};
+    use tokio::io::{AsyncRead, AsyncWrite};
     use tokio_timer::{Timer, Sleep};
 
     use std::io;

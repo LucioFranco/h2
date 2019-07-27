@@ -81,6 +81,7 @@
 #![doc(html_root_url = "https://docs.rs/h2/0.1.25")]
 #![deny(missing_debug_implementations, missing_docs)]
 #![cfg_attr(test, deny(warnings))]
+#![feature(async_await)]
 
 macro_rules! proto_err {
     (conn: $($msg:tt)+) => {
@@ -113,3 +114,39 @@ pub use crate::share::{SendStream, StreamId, RecvStream, ReleaseCapacity, PingPo
 
 #[cfg(feature = "unstable")]
 pub use codec::{Codec, RecvError, SendError, UserError};
+
+use std::task::Poll;
+
+trait PollExt<T, E> {
+    /// Changes the success value of this `Poll` with the closure provided.
+    fn map_ok<U, F>(self, f: F) -> Poll<Option<Result<U, E>>>
+        where F: FnOnce(T) -> U;
+        
+    /// Changes the error value of this `Poll` with the closure provided.
+    fn map_err<U, F>(self, f: F) -> Poll<Option<Result<T, U>>>
+        where F: FnOnce(E) -> U;
+}
+
+impl<T, E> PollExt<T, E> for Poll<Option<Result<T, E>>> {
+    fn map_ok<U, F>(self, f: F) -> Poll<Option<Result<U, E>>>
+        where F: FnOnce(T) -> U
+    {
+        match self {
+            Poll::Ready(Some(Ok(t))) => Poll::Ready(Some(Ok(f(t)))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn map_err<U, F>(self, f: F) -> Poll<Option<Result<T, U>>>
+        where F: FnOnce(E) -> U
+    {
+        match self {
+            Poll::Ready(Some(Ok(t))) => Poll::Ready(Some(Ok(t))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(f(e)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}

@@ -27,7 +27,7 @@ pub use super::{assert_ping, assert_data, assert_headers, assert_closed,
                 raw_codec, poll_frame, poll_err};
 
 // Re-export useful crates
-pub use {bytes, env_logger, futures, http, tokio_io};
+pub use {bytes, env_logger, futures, http, tokio::io};
 pub use super::mock_io;
 
 // Re-export primary future types
@@ -44,7 +44,7 @@ pub use http::{uri, HeaderMap, Method, Request, Response, StatusCode, Version};
 
 pub use bytes::{Buf, BufMut, Bytes, BytesMut, IntoBuf};
 
-pub use tokio_io::{AsyncRead, AsyncWrite};
+pub use tokio::io::{AsyncRead, AsyncWrite};
 
 pub use std::thread;
 pub use std::time::Duration;

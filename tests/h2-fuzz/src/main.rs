@@ -4,7 +4,7 @@ use http::{Method, Request};
 use std::cell::Cell;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite};
 use futures::stream::futures_unordered::FuturesUnordered;
 
 struct MockIo<'a> {

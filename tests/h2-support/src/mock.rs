@@ -7,8 +7,8 @@ use futures::{Async, Future, Poll, Stream};
 use futures::sync::oneshot;
 use futures::task::{self, Task};
 
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::io::read_exact;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::io::read_exact;
 
 use std::{cmp, fmt, io, usize};
 use std::io::ErrorKind::WouldBlock;
@@ -276,7 +276,7 @@ impl io::Write for Handle {
 impl AsyncWrite for Handle {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         use std::io::Write;
-        tokio_io::try_nb!(self.flush());
+        tokio::io::try_nb!(self.flush());
         Ok(().into())
     }
 }
@@ -359,7 +359,7 @@ impl io::Write for Mock {
 impl AsyncWrite for Mock {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         use std::io::Write;
-        tokio_io::try_nb!(self.flush());
+        tokio::io::try_nb!(self.flush());
         Ok(().into())
     }
 }
@@ -426,7 +426,7 @@ impl io::Write for Pipe {
 impl AsyncWrite for Pipe {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         use std::io::Write;
-        tokio_io::try_nb!(self.flush());
+        tokio::io::try_nb!(self.flush());
         Ok(().into())
     }
 }

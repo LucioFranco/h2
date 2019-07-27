@@ -21,12 +21,9 @@ use self::settings::Settings;
 
 use crate::frame::{self, Frame};
 
-use futures::{task, Async, Poll};
-use futures::task::Task;
-
 use bytes::Buf;
 
-use tokio_io::AsyncWrite;
+use tokio::io::AsyncWrite;
 
 pub type PingPayload = [u8; 8];
 

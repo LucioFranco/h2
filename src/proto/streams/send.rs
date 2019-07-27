@@ -7,9 +7,8 @@ use super::{
 
 use bytes::Buf;
 use http;
-use futures::{Async, Poll};
-use futures::task::Task;
-use tokio_io::AsyncWrite;
+use std::task::{Context, Waker, Poll};
+use tokio::io::AsyncWrite;
 
 use std::io;
 
@@ -60,7 +59,7 @@ impl Send {
         buffer: &mut Buffer<Frame<B>>,
         stream: &mut store::Ptr,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) -> Result<(), UserError> {
         log::trace!(
             "send_headers; frame={:?}; init_window={:?}",
@@ -115,7 +114,7 @@ impl Send {
         buffer: &mut Buffer<Frame<B>>,
         stream: &mut store::Ptr,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) {
         let is_reset = stream.state.is_reset();
         let is_closed = stream.state.is_closed();
@@ -175,7 +174,7 @@ impl Send {
         stream: &mut store::Ptr,
         reason: Reason,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) {
         if stream.state.is_closed() {
             // Stream is already closed, nothing more to do
@@ -194,7 +193,7 @@ impl Send {
         buffer: &mut Buffer<Frame<B>>,
         stream: &mut store::Ptr,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) -> Result<(), UserError>
         where B: Buf,
     {
@@ -207,7 +206,7 @@ impl Send {
         buffer: &mut Buffer<Frame<B>>,
         stream: &mut store::Ptr,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) -> Result<(), UserError> {
         // TODO: Should this logic be moved into state.rs?
         if !stream.state.is_send_streaming() {
@@ -231,15 +230,16 @@ impl Send {
 
     pub fn poll_complete<T, B>(
         &mut self,
+        cx: &mut Context,
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
         counts: &mut Counts,
         dst: &mut Codec<T, Prioritized<B>>,
-    ) -> Poll<(), io::Error>
-    where T: AsyncWrite,
-          B: Buf,
+    ) -> Poll<io::Result<()>>
+    where T: AsyncWrite + Unpin,
+          B: Buf + Unpin,
     {
-        self.prioritize.poll_complete(buffer, store, counts, dst)
+        self.prioritize.poll_complete(cx, buffer, store, counts, dst)
     }
 
     /// Request capacity to send data
@@ -254,20 +254,21 @@ impl Send {
 
     pub fn poll_capacity(
         &mut self,
+        cx: &Context,
         stream: &mut store::Ptr,
-    ) -> Poll<Option<WindowSize>, UserError> {
+    ) -> Poll<Option<Result<WindowSize, UserError>>> {
         if !stream.state.is_send_streaming() {
-            return Ok(Async::Ready(None));
+            return Poll::Ready(None);
         }
 
         if !stream.send_capacity_inc {
-            stream.wait_send();
-            return Ok(Async::NotReady);
+            stream.wait_send(cx);
+            return Poll::Pending;
         }
 
         stream.send_capacity_inc = false;
 
-        Ok(Async::Ready(Some(self.capacity(stream))))
+        Poll::Ready(Some(Ok(self.capacity(stream))))
     }
 
     /// Current available stream send capacity
@@ -284,14 +285,15 @@ impl Send {
 
     pub fn poll_reset(
         &self,
+        cx: &Context,
         stream: &mut Stream,
         mode: PollReset,
-    ) -> Poll<Reason, crate::Error> {
+    ) -> Poll<Result<Reason, crate::Error>> {
         match stream.state.ensure_reason(mode)? {
-            Some(reason) => Ok(reason.into()),
+            Some(reason) => Poll::Ready(Ok(reason)),
             None => {
-                stream.wait_send();
-                Ok(Async::NotReady)
+                stream.wait_send(cx);
+                Poll::Pending
             },
         }
     }
@@ -312,7 +314,7 @@ impl Send {
         buffer: &mut Buffer<Frame<B>>,
         stream: &mut store::Ptr,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) -> Result<(), Reason> {
         if let Err(e) = self.prioritize.recv_stream_window_update(sz, stream) {
             log::debug!("recv_stream_window_update !!; err={:?}", e);
@@ -344,7 +346,7 @@ impl Send {
         buffer: &mut Buffer<Frame<B>>,
         store: &mut Store,
         counts: &mut Counts,
-        task: &mut Option<Task>,
+        task: &mut Option<Waker>,
     ) -> Result<(), RecvError> {
         // Applies an update to the remote endpoint's initial window size.
         //

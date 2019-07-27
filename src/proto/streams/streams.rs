@@ -7,12 +7,14 @@ use super::recv::RecvHeaderBlockError;
 use super::store::{self, Entry, Resolve, Store};
 
 use bytes::{Buf, Bytes};
-use futures::{task, Async, Poll, try_ready};
 use http::{HeaderMap, Request, Response};
-use tokio_io::AsyncWrite;
+use tokio::io::AsyncWrite;
+use std::task::{Poll, Context, Waker};
+use futures::ready;
 
 use std::{fmt, io};
 use std::sync::{Arc, Mutex};
+use crate::PollExt;
 
 #[derive(Debug)]
 pub(crate) struct Streams<B, P>
@@ -77,7 +79,7 @@ struct Actions {
     send: Send,
 
     /// Task that calls `poll_complete`.
-    task: Option<task::Task>,
+    task: Option<Waker>,
 
     /// If the connection errors, a copy is kept for any StreamRefs.
     conn_error: Option<proto::Error>,
@@ -93,7 +95,7 @@ struct SendBuffer<B> {
 
 impl<B, P> Streams<B, P>
 where
-    B: Buf,
+    B: Buf + Unpin,
     P: Peer,
 {
     pub fn new(config: Config) -> Self {
@@ -559,14 +561,16 @@ where
 
     pub fn send_pending_refusal<T>(
         &mut self,
+        cx: &mut Context,
         dst: &mut Codec<T, Prioritized<B>>,
-    ) -> Poll<(), io::Error>
+    ) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite,
+        T: AsyncWrite + Unpin,
+        B: Unpin,
     {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
-        me.actions.recv.send_pending_refusal(dst)
+        me.actions.recv.send_pending_refusal(cx, dst)
     }
 
     pub fn clear_expired_reset_streams(&mut self) {
@@ -575,9 +579,9 @@ where
         me.actions.recv.clear_expired_reset_streams(&mut me.store, &mut me.counts);
     }
 
-    pub fn poll_complete<T>(&mut self, dst: &mut Codec<T, Prioritized<B>>) -> Poll<(), io::Error>
+    pub fn poll_complete<T>(&mut self, cx: &mut Context, dst: &mut Codec<T, Prioritized<B>>) -> Poll<io::Result<()>>
     where
-        T: AsyncWrite,
+        T: AsyncWrite + Unpin,
     {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
@@ -589,20 +593,21 @@ where
         //
         // TODO: It would probably be better to interleave updates w/ data
         // frames.
-        try_ready!(me.actions.recv.poll_complete(&mut me.store, &mut me.counts, dst));
+        ready!(me.actions.recv.poll_complete(cx, &mut me.store, &mut me.counts, dst))?;
 
         // Send any other pending frames
-        try_ready!(me.actions.send.poll_complete(
+        ready!(me.actions.send.poll_complete(
+            cx,
             send_buffer,
             &mut me.store,
             &mut me.counts,
             dst
-        ));
+        ))?;
 
         // Nothing else to do, track the task
-        me.actions.task = Some(task::current());
+        me.actions.task = Some(cx.waker().clone());
 
-        Ok(().into())
+        Poll::Ready(Ok(()))
     }
 
     pub fn apply_remote_settings(&mut self, frame: &frame::Settings) -> Result<(), RecvError> {
@@ -740,7 +745,7 @@ impl<B> Streams<B, client::Peer>
 where
     B: Buf,
 {
-    pub fn poll_pending_open(&mut self, pending: Option<&OpaqueStreamRef>) -> Poll<(), crate::Error> {
+    pub fn poll_pending_open(&mut self, cx: &Context, pending: Option<&OpaqueStreamRef>) -> Poll<Result<(), crate::Error>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
 
@@ -751,11 +756,11 @@ where
             let mut stream = me.store.resolve(pending.key);
             log::trace!("poll_pending_open; stream = {:?}", stream.is_pending_open);
             if stream.is_pending_open {
-                stream.wait_send();
-                return Ok(Async::NotReady);
+                stream.wait_send(cx);
+                return Poll::Pending;
             }
         }
-        Ok(().into())
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -969,23 +974,23 @@ impl<B> StreamRef<B> {
     }
 
     /// Request to be notified when the stream's capacity increases
-    pub fn poll_capacity(&mut self) -> Poll<Option<WindowSize>, UserError> {
+    pub fn poll_capacity(&mut self, cx: &Context) -> Poll<Option<Result<WindowSize, UserError>>> {
         let mut me = self.opaque.inner.lock().unwrap();
         let me = &mut *me;
 
         let mut stream = me.store.resolve(self.opaque.key);
 
-        me.actions.send.poll_capacity(&mut stream)
+        me.actions.send.poll_capacity(cx, &mut stream)
     }
 
     /// Request to be notified for if a `RST_STREAM` is received for this stream.
-    pub(crate) fn poll_reset(&mut self, mode: proto::PollReset) -> Poll<Reason, crate::Error> {
+    pub(crate) fn poll_reset(&mut self, cx: &Context, mode: proto::PollReset) -> Poll<Result<Reason, crate::Error>> {
         let mut me = self.opaque.inner.lock().unwrap();
         let me = &mut *me;
 
         let mut stream = me.store.resolve(self.opaque.key);
 
-        me.actions.send.poll_reset(&mut stream, mode)
+        me.actions.send.poll_reset(cx, &mut stream, mode)
             .map_err(From::from)
     }
 
@@ -1019,31 +1024,29 @@ impl OpaqueStreamRef {
         }
     }
     /// Called by a client to check for a received response.
-    pub fn poll_response(&mut self) -> Poll<Response<()>, proto::Error> {
+    pub fn poll_response(&mut self, cx: &Context) -> Poll<Result<Response<()>, proto::Error>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
 
         let mut stream = me.store.resolve(self.key);
 
-        me.actions.recv.poll_response(&mut stream)
+        me.actions.recv.poll_response(cx, &mut stream)
     }
     /// Called by a client to check for a pushed request.
     pub fn poll_pushed(
-        &mut self
-    ) -> Poll<Option<(Request<()>, OpaqueStreamRef)>, proto::Error> {
+        &mut self, cx: &Context
+    ) -> Poll<Option<Result<(Request<()>, OpaqueStreamRef), proto::Error>>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
 
-        let res = {
-            let mut stream = me.store.resolve(self.key);
-            try_ready!(me.actions.recv.poll_pushed(&mut stream))
-        };
-        Ok(Async::Ready(res.map(|(h, key)| {
+        let mut stream = me.store.resolve(self.key);
+        me.actions.recv.poll_pushed(cx, &mut stream)
+        .map_ok(|(h, key)| {
             me.refs += 1;
             let opaque_ref =
                 OpaqueStreamRef::new(self.inner.clone(), &mut me.store.resolve(key));
             (h, opaque_ref)
-        })))
+        })
     }
 
     pub fn body_is_empty(&self) -> bool {
@@ -1064,22 +1067,22 @@ impl OpaqueStreamRef {
         me.actions.recv.is_end_stream(&stream)
     }
 
-    pub fn poll_data(&mut self) -> Poll<Option<Bytes>, proto::Error> {
+    pub fn poll_data(&mut self, cx: &Context) -> Poll<Option<Result<Bytes, proto::Error>>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
 
         let mut stream = me.store.resolve(self.key);
 
-        me.actions.recv.poll_data(&mut stream)
+        me.actions.recv.poll_data(cx, &mut stream)
     }
 
-    pub fn poll_trailers(&mut self) -> Poll<Option<HeaderMap>, proto::Error> {
+    pub fn poll_trailers(&mut self, cx: &Context) -> Poll<Option<Result<HeaderMap, proto::Error>>> {
         let mut me = self.inner.lock().unwrap();
         let me = &mut *me;
 
         let mut stream = me.store.resolve(self.key);
 
-        me.actions.recv.poll_trailers(&mut stream)
+        me.actions.recv.poll_trailers(cx, &mut stream)
     }
 
     /// Releases recv capacity back to the peer. This may result in sending
@@ -1189,7 +1192,7 @@ fn drop_stream_ref(inner: &Mutex<Inner>, key: store::Key) {
     // (connection) so that it can close properly
     if stream.ref_count == 0 && stream.is_closed() {
         if let Some(task) = actions.task.take() {
-            task.notify();
+            task.wake();
         }
     }
 

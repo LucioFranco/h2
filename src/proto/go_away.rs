@@ -2,9 +2,9 @@ use crate::codec::Codec;
 use crate::frame::{self, Reason, StreamId};
 
 use bytes::Buf;
-use futures::{Async, Poll};
+use std::task::{Poll, Context};
 use std::io;
-use tokio_io::AsyncWrite;
+use tokio::io::AsyncWrite;
 
 /// Manages our sending of GOAWAY frames.
 #[derive(Debug)]
@@ -121,15 +121,15 @@ impl GoAway {
     /// Try to write a pending GOAWAY frame to the buffer.
     ///
     /// If a frame is written, the `Reason` of the GOAWAY is returned.
-    pub fn send_pending_go_away<T, B>(&mut self, dst: &mut Codec<T, B>) -> Poll<Option<Reason>, io::Error>
+    pub fn send_pending_go_away<T, B>(&mut self, cx: &mut Context, dst: &mut Codec<T, B>) -> Poll<Option<io::Result<Reason>>>
     where
-        T: AsyncWrite,
-        B: Buf,
+        T: AsyncWrite + Unpin,
+        B: Buf + Unpin,
     {
         if let Some(frame) = self.pending.take() {
-            if !dst.poll_ready()?.is_ready() {
+            if !dst.poll_ready(cx)?.is_ready() {
                 self.pending = Some(frame);
-                return Ok(Async::NotReady);
+                return Poll::Pending;
             }
 
             let reason = frame.reason();
@@ -137,11 +137,14 @@ impl GoAway {
                 .ok()
                 .expect("invalid GOAWAY frame");
 
-            return Ok(Async::Ready(Some(reason)));
+            return Poll::Ready(Some(Ok(reason)));
         } else if self.should_close_now() {
-            return Ok(Async::Ready(self.going_away_reason()));
+            return match self.going_away_reason() {
+                Some(reason) => Poll::Ready(Some(Ok(reason))),
+                None => Poll::Ready(None),
+            };
         }
 
-        Ok(Async::Ready(None))
+        Poll::Ready(None)
     }
 }
