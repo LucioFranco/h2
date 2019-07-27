@@ -15,7 +15,7 @@ addons:
 matrix:
   include:
   - rust: nightly
-  - rust: stable
+#  - rust: stable
     before_deploy: cargo doc --no-deps
   allow_failures:
     - rust: nightly
