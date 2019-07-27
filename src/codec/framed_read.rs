@@ -305,7 +305,7 @@ impl<T> FramedRead<T> {
     #[cfg(feature = "unstable")]
     #[inline]
     pub fn max_frame_size(&self) -> usize {
-        self.inner.max_frame_length()
+        self.inner.decoder().max_frame_length()
     }
 
     /// Updates the max frame size setting.

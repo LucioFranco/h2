@@ -17,8 +17,8 @@ matrix:
   - rust: nightly
 #  - rust: stable
     before_deploy: cargo doc --no-deps
-  allow_failures:
-    - rust: nightly
+#  allow_failures:
+#    - rust: nightly
 
 before_script:
   - cargo clean

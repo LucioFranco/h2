@@ -65,71 +65,59 @@
 //! # Example
 //!
 //! ```rust
+//! #![feature(async_await)]
+//!
 //! use h2::client;
 //!
 //! use futures::*;
-//! use http::*;
-//!
+//! use http::{Request, Method};
+//! use std::error::Error;
 //! use tokio::net::TcpStream;
 //!
-//! pub fn main() {
+//! #[tokio::main]
+//! pub async fn main() -> Result<(), Box<dyn Error>> {
 //!     let addr = "127.0.0.1:5928".parse().unwrap();
+//!     
+//!     // Establish TCP connection to the server.
+//!     let tcp = TcpStream::connect(&addr).await?;
+//!     let (h2, connection) = client::handshake(tcp).await?;
+//!     tokio::spawn(async move {
+//!         connection.await.unwrap();
+//!     });
 //!
-//!     tokio::run(
-//!         // Establish TCP connection to the server.
-//!         TcpStream::connect(&addr)
-//!             .map_err(|_| {
-//!                 panic!("failed to establish TCP connection")
-//!             })
-//!             .and_then(|tcp| client::handshake(tcp))
-//!             .and_then(|(h2, connection)| {
-//!                 let connection = connection
-//!                     .map_err(|_| panic!("HTTP/2.0 connection failed"));
-//!
-//!                 // Spawn a new task to drive the connection state
-//!                 tokio::spawn(connection);
-//!
-//!                 // Wait until the `SendRequest` handle has available
-//!                 // capacity.
-//!                 h2.ready()
-//!             })
-//!             .and_then(|mut h2| {
-//!                 // Prepare the HTTP request to send to the server.
-//!                 let request = Request::builder()
+//!     let mut h2 = h2.ready().await?;
+//!     // Prepare the HTTP request to send to the server.
+//!     let request = Request::builder()
 //!                     .method(Method::GET)
 //!                     .uri("https://www.example.com/")
 //!                     .body(())
 //!                     .unwrap();
 //!
-//!                 // Send the request. The second tuple item allows the caller
-//!                 // to stream a request body.
-//!                 let (response, _) = h2.send_request(request, true).unwrap();
+//!     // Send the request. The second tuple item allows the caller
+//!     // to stream a request body.
+//!     let (response, _) = h2.send_request(request, true).unwrap();
+//!     
+//!     let (head, mut body) = response.await?.into_parts();
 //!
-//!                 response.and_then(|response| {
-//!                     let (head, mut body) = response.into_parts();
+//!     println!("Received response: {:?}", head);
 //!
-//!                     println!("Received response: {:?}", head);
+//!     // The `release_capacity` handle allows the caller to manage
+//!     // flow control.
+//!     //
+//!     // Whenever data is received, the caller is responsible for
+//!     // releasing capacity back to the server once it has freed
+//!     // the data from memory.
+//!     let mut release_capacity = body.release_capacity().clone();
 //!
-//!                     // The `release_capacity` handle allows the caller to manage
-//!                     // flow control.
-//!                     //
-//!                     // Whenever data is received, the caller is responsible for
-//!                     // releasing capacity back to the server once it has freed
-//!                     // the data from memory.
-//!                     let mut release_capacity = body.release_capacity().clone();
+//!     while let Some(chunk) = body.next().await {
+//!         let chunk = chunk?;
+//!         println!("RX: {:?}", chunk);
 //!
-//!                     body.for_each(move |chunk| {
-//!                         println!("RX: {:?}", chunk);
+//!         // Let the server send more data.
+//!         let _ = release_capacity.release_capacity(chunk.len());
+//!     }
 //!
-//!                         // Let the server send more data.
-//!                         let _ = release_capacity.release_capacity(chunk.len());
-//!
-//!                         Ok(())
-//!                     })
-//!                 })
-//!             })
-//!             .map_err(|e| panic!("failed to perform HTTP/2.0 request: {:?}", e))
-//!     )
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -151,23 +139,23 @@
 //! [`Builder`]: struct.Builder.html
 //! [`Error`]: ../struct.Error.html
 
-use crate::{SendStream, RecvStream, ReleaseCapacity, PingPong};
 use crate::codec::{Codec, RecvError, SendError, UserError};
 use crate::frame::{Headers, Pseudo, Reason, Settings, StreamId};
 use crate::proto;
+use crate::{PingPong, RecvStream, ReleaseCapacity, SendStream};
 
 use bytes::{Bytes, IntoBuf};
-use futures::{Stream, ready};
-use std::future::Future;
-use std::task::{Context, Poll};
-use std::pin::Pin;
-use http::{uri, HeaderMap, Request, Response, Method, Version};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use std::io;
+use futures::{ready, Stream};
+use http::{uri, HeaderMap, Method, Request, Response, Version};
 use std::fmt;
+use std::future::Future;
+use std::io;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use std::usize;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 /// Performs the HTTP/2.0 connection handshake.
 ///
@@ -186,7 +174,7 @@ use std::usize;
 #[must_use = "futures do nothing unless polled"]
 pub struct Handshake<T, B = Bytes> {
     builder: Builder,
-    inner: Pin<Box<dyn Future<Output=io::Result<T>>>>,
+    inner: Pin<Box<dyn Future<Output = io::Result<T>>>>,
     _marker: PhantomData<fn(B)>,
 }
 
@@ -255,7 +243,7 @@ pub struct ReadySendRequest<B: IntoBuf> {
 /// # use h2::client::*;
 /// #
 /// # fn doc<T, E>(my_io: T, my_executor: E)
-/// # where T: AsyncRead + AsyncWrite + 'static,
+/// # where T: AsyncRead + AsyncWrite + Unpin + 'static,
 /// #       E: Executor<Box<Future<Item = (), Error = ()>>>,
 /// # {
 /// client::handshake(my_io)
@@ -340,7 +328,7 @@ pub struct PushPromises {
 /// # use tokio::io::*;
 /// # use h2::client::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+/// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
 /// # -> Handshake<T>
 /// # {
 /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -636,8 +624,9 @@ where
 // ===== impl ReadySendRequest =====
 
 impl<B> Future for ReadySendRequest<B>
-where B: IntoBuf + Unpin,
-      B::Buf: Unpin + 'static,
+where
+    B: IntoBuf + Unpin,
+    B::Buf: Unpin + 'static,
 {
     type Output = Result<SendRequest<B>, crate::Error>;
 
@@ -668,7 +657,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -709,7 +698,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -743,7 +732,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -776,7 +765,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -815,7 +804,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -863,7 +852,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -903,7 +892,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -947,7 +936,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -992,7 +981,7 @@ impl Builder {
     /// # use h2::client::*;
     /// # use std::time::Duration;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -1029,7 +1018,7 @@ impl Builder {
     /// # use h2::client::*;
     /// # use std::time::Duration;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -1083,7 +1072,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -1103,7 +1092,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
     /// # -> Handshake<T, &'static [u8]>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
@@ -1156,7 +1145,7 @@ impl Default for Builder {
 /// # use h2::client;
 /// # use h2::client::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+/// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
 /// # {
 /// client::handshake(my_io)
 ///     .and_then(|(send_request, connection)| {
@@ -1171,7 +1160,8 @@ impl Default for Builder {
 /// # pub fn main() {}
 /// ```
 pub fn handshake<T>(io: T) -> Handshake<T, Bytes>
-where T: AsyncRead + AsyncWrite + Unpin + 'static,
+where
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     Builder::new().handshake(io)
 }
@@ -1230,9 +1220,7 @@ where
     ///
     /// This may only be called once. Calling multiple times will return `None`.
     pub fn ping_pong(&mut self) -> Option<PingPong> {
-        self.inner
-            .take_user_pings()
-            .map(PingPong::new)
+        self.inner.take_user_pings().map(PingPong::new)
     }
 }
 
@@ -1275,7 +1263,9 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let pinned = Pin::get_mut(self);
-        let res = Pin::new(&mut pinned.inner).poll(cx).map_err(crate::Error::from);
+        let res = Pin::new(&mut pinned.inner)
+            .poll(cx)
+            .map_err(crate::Error::from);
 
         let io = ready!(res)?;
 
@@ -1297,13 +1287,16 @@ where
             .buffer(pinned.builder.settings.clone().into())
             .expect("invalid SETTINGS frame");
 
-        let inner = proto::Connection::new(codec, proto::Config {
-            next_stream_id: pinned.builder.stream_id,
-            initial_max_send_streams: pinned.builder.initial_max_send_streams,
-            reset_stream_duration: pinned.builder.reset_stream_duration,
-            reset_stream_max: pinned.builder.reset_stream_max,
-            settings: pinned.builder.settings.clone(),
-        });
+        let inner = proto::Connection::new(
+            codec,
+            proto::Config {
+                next_stream_id: pinned.builder.stream_id,
+                initial_max_send_streams: pinned.builder.initial_max_send_streams,
+                reset_stream_duration: pinned.builder.reset_stream_duration,
+                reset_stream_max: pinned.builder.reset_stream_max,
+                settings: pinned.builder.settings.clone(),
+            },
+        );
         let send_request = SendRequest {
             inner: inner.streams().clone(),
             pending: None,
@@ -1364,7 +1357,9 @@ impl ResponseFuture {
             panic!("Reference to push promises stream taken!");
         }
         self.push_promise_consumed = true;
-        PushPromises { inner: self.inner.clone() }
+        PushPromises {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -1379,11 +1374,12 @@ impl Stream for PushPromises {
             Poll::Ready(Some(Ok((request, response)))) => {
                 let response = PushedResponseFuture {
                     inner: ResponseFuture {
-                        inner: response, push_promise_consumed: false
-                    }
+                        inner: response,
+                        push_promise_consumed: false,
+                    },
                 };
-                Poll::Ready(Some(Ok(PushPromise{request, response})))
-            },
+                Poll::Ready(Some(Ok(PushPromise { request, response })))
+            }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e.into()))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
@@ -1438,8 +1434,8 @@ impl Peer {
     pub fn convert_send_message(
         id: StreamId,
         request: Request<()>,
-        end_of_stream: bool) -> Result<Headers, SendError>
-    {
+        end_of_stream: bool,
+    ) -> Result<Headers, SendError> {
         use http::request::Parts;
 
         let (
@@ -1510,7 +1506,9 @@ impl proto::Peer for Peer {
     }
 
     fn convert_poll_message(
-        pseudo: Pseudo, fields: HeaderMap, stream_id: StreamId
+        pseudo: Pseudo,
+        fields: HeaderMap,
+        stream_id: StreamId,
     ) -> Result<Self::Poll, RecvError> {
         let mut b = Response::builder();
 
@@ -1529,7 +1527,7 @@ impl proto::Peer for Peer {
                     id: stream_id,
                     reason: Reason::PROTOCOL_ERROR,
                 });
-            },
+            }
         };
 
         *response.headers_mut() = fields;
