@@ -1,14 +1,17 @@
-use futures::{Async, Future, Poll};
-
+use std::future::Future;
+use std::task::{Poll, Context};
+use std::pin::Pin;
 use std::fmt;
+use futures::ready;
+use futures::FutureExt as _;
 
 /// Future extension helpers that are useful for tests
-pub trait FutureExt: Future {
+pub trait FutureExt<V, E>: Future<Output = Result<V, E>> {
     /// Panic on error
     fn unwrap(self) -> Unwrap<Self>
     where
         Self: Sized,
-        Self::Error: fmt::Debug,
+        E: fmt::Debug,
     {
         Unwrap {
             inner: self,
@@ -19,7 +22,7 @@ pub trait FutureExt: Future {
     fn unwrap_err(self) -> UnwrapErr<Self>
     where
         Self: Sized,
-        Self::Error: fmt::Debug,
+        E: fmt::Debug,
     {
         UnwrapErr {
             inner: self,
@@ -30,7 +33,7 @@ pub trait FutureExt: Future {
     fn expect_err<T>(self, msg: T) -> ExpectErr<Self>
     where
         Self: Sized,
-        Self::Error: fmt::Debug,
+        E: fmt::Debug,
         T: fmt::Display,
     {
         ExpectErr{
@@ -43,7 +46,7 @@ pub trait FutureExt: Future {
     fn expect<T>(self, msg: T) -> Expect<Self>
     where
         Self: Sized,
-        Self::Error: fmt::Debug,
+        E: fmt::Debug,
         T: fmt::Display,
     {
         Expect {
@@ -58,9 +61,7 @@ pub trait FutureExt: Future {
     fn drive<T>(self, other: T) -> Drive<Self, T>
     where
         T: Future,
-        T::Error: fmt::Debug,
-        Self: Future<Item = ()> + Sized,
-        Self::Error: fmt::Debug,
+        Self: Future + Sized,
     {
         Drive {
             driver: Some(self),
@@ -72,7 +73,7 @@ pub trait FutureExt: Future {
     ///
     /// This allows the executor to poll other futures before trying this one
     /// again.
-    fn yield_once(self) -> Box<dyn Future<Item = Self::Item, Error = Self::Error>>
+    fn yield_once(self) -> Box<dyn Future<Output=Self::Output>>
     where
         Self: Future + Sized + 'static,
     {
@@ -80,7 +81,7 @@ pub trait FutureExt: Future {
     }
 }
 
-impl<T: Future> FutureExt for T {}
+impl<T: Future<Output = Result<V, E>>, V, E> FutureExt<V, E> for T {}
 
 // ===== Unwrap ======
 
@@ -89,17 +90,18 @@ pub struct Unwrap<T> {
     inner: T,
 }
 
-impl<T> Future for Unwrap<T>
+impl<T, V, E> Future for Unwrap<T>
 where
-    T: Future,
-    T::Item: fmt::Debug,
-    T::Error: fmt::Debug,
+    T: Future<Output=Result<V, E>> + Unpin,
+    V: fmt::Debug,
+    E: fmt::Debug,
 {
-    type Item = T::Item;
-    type Error = ();
+    type Output = V;
 
-    fn poll(&mut self) -> Poll<T::Item, ()> {
-        Ok(self.inner.poll().unwrap())
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<V> {
+        let pinned = Pin::get_mut(self);
+        let result = ready!(Pin::new(&mut pinned.inner).poll(cx));
+        Poll::Ready(result.unwrap())
     }
 }
 
@@ -110,20 +112,19 @@ pub struct UnwrapErr<T> {
     inner: T,
 }
 
-impl<T> Future for UnwrapErr<T>
+impl<T, V, E> Future for UnwrapErr<T>
 where
-    T: Future,
-    T::Item: fmt::Debug,
-    T::Error: fmt::Debug,
+    T: Future<Output=Result<V, E>> + Unpin,
+    V: fmt::Debug,
+    E: fmt::Debug,
 {
-    type Item = T::Error;
-    type Error = ();
+    type Output = E;
 
-    fn poll(&mut self) -> Poll<T::Error, ()> {
-        match self.inner.poll() {
-            Ok(Async::Ready(v)) => panic!("Future::unwrap_err() on an Ok value: {:?}", v),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => Ok(Async::Ready(e)),
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<E> {
+        let pinned = Pin::get_mut(self);
+        match ready!(Pin::new(&mut pinned.inner).poll(cx)) {
+            Ok(v) => panic!("Future::unwrap_err() on an Ok value: {:?}", v),
+            Err(e) => Poll::Ready(e),
         }
     }
 }
@@ -138,17 +139,18 @@ pub struct Expect<T> {
     msg: String,
 }
 
-impl<T> Future for Expect<T>
+impl<T, V, E> Future for Expect<T>
 where
-    T: Future,
-    T::Item: fmt::Debug,
-    T::Error: fmt::Debug,
+    T: Future<Output=Result<V, E>> + Unpin,
+    V: fmt::Debug,
+    E: fmt::Debug,
 {
-    type Item = T::Item;
-    type Error = ();
+    type Output = V;
 
-    fn poll(&mut self) -> Poll<T::Item, ()> {
-        Ok(self.inner.poll().expect(&self.msg))
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<V> {
+        let pinned = Pin::get_mut(self);
+        let result = ready!(Pin::new(&mut pinned.inner).poll(cx));
+        Poll::Ready(result.expect(&pinned.msg))
     }
 }
 
@@ -160,20 +162,19 @@ pub struct ExpectErr<T> {
     msg: String,
 }
 
-impl<T> Future for ExpectErr<T>
+impl<T, V, E> Future for ExpectErr<T>
 where
-    T: Future,
-    T::Item: fmt::Debug,
-    T::Error: fmt::Debug,
+    T: Future<Output=Result<V, E>> + Unpin,
+    V: fmt::Debug,
+    E: fmt::Debug,
 {
-    type Item = T::Error;
-    type Error = ();
+    type Output = E;
 
-    fn poll(&mut self) -> Poll<T::Error, ()> {
-        match self.inner.poll() {
-            Ok(Async::Ready(v)) => panic!("{}: {:?}", self.msg, v),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => Ok(Async::Ready(e)),
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<E> {
+        let pinned = Pin::get_mut(self);
+        match ready!(Pin::new(&mut pinned.inner).poll(cx)) {
+            Ok(v) => panic!("{}: {:?}", pinned.msg, v),
+            Err(e) => Poll::Ready(e),
         }
     }
 }
@@ -188,33 +189,32 @@ pub struct Drive<T, U> {
     future: U,
 }
 
-impl<T, U> Future for Drive<T, U>
+impl<T, U, V, E1, E2> Future for Drive<T, U>
 where
-    T: Future<Item = ()>,
-    U: Future,
-    T::Error: fmt::Debug,
-    U::Error: fmt::Debug,
+    T: Future<Output = Result<(), E1>> + Unpin,
+    U: Future<Output = Result<V, E2>> + Unpin,
+    E1: fmt::Debug,
+    E2: fmt::Debug,
 {
-    type Item = (T, U::Item);
-    type Error = ();
+    type Output = (T, V);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut looped = false;
-
+        let pinned = Pin::get_mut(self);
         loop {
-            match self.future.poll() {
-                Ok(Async::Ready(val)) => {
+            match Pin::new(&mut pinned.future).poll(cx) {
+                Poll::Ready(Ok(val)) => {
                     // Get the driver
-                    let driver = self.driver.take().unwrap();
+                    let driver = pinned.driver.take().unwrap();
 
-                    return Ok((driver, val).into());
+                    return Poll::Ready((driver, val));
                 },
-                Ok(_) => {},
-                Err(e) => panic!("unexpected error; {:?}", e),
+                Poll::Pending => {},
+                Poll::Ready(Err(e)) => panic!("unexpected error; {:?}", e),
             }
 
-            match self.driver.as_mut().unwrap().poll() {
-                Ok(Async::Ready(_)) => {
+            match Pin::new(pinned.driver.as_mut().unwrap()).poll(cx) {
+                Poll::Ready(Ok(_)) => {
                     if looped {
                         // Try polling the future one last time
                         panic!("driver resolved before future")
@@ -223,11 +223,11 @@ where
                         continue;
                     }
                 },
-                Ok(Async::NotReady) => {},
-                Err(e) => panic!("unexpected error; {:?}", e),
+                Poll::Pending => {},
+                Poll::Ready(Err(e)) => panic!("unexpected error; {:?}", e),
             }
 
-            return Ok(Async::NotReady);
+            return Poll::Pending;
         }
     }
 }

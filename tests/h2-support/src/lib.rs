@@ -1,3 +1,4 @@
+#![feature(async_await)]
 //! Utilities to support tests.
 
 #[macro_use]

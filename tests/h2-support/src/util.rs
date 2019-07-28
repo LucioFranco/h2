@@ -2,21 +2,24 @@ use h2;
 
 use string::{String, TryFrom};
 use bytes::Bytes;
-use futures::{Async, Future, Poll};
+use std::future::Future;
+use std::task::{Poll, Context};
+use std::pin::Pin;
+use futures::ready;
 
 pub fn byte_str(s: &str) -> String<Bytes> {
     String::try_from(Bytes::from(s)).unwrap()
 }
 
-pub fn yield_once() -> impl Future<Item=(), Error=()> {
+pub fn yield_once() -> impl Future<Output=()> {
     let mut yielded = false;
-    futures::future::poll_fn(move || {
+    futures::future::poll_fn(move |cx| {
         if yielded {
-            Ok(Async::Ready(()))
+           Poll::Ready(())
         } else {
             yielded = true;
-            futures::task::current().notify();
-            Ok(Async::NotReady)
+            cx.waker().clone().wake();
+            Poll::Pending
         }
     })
 }
@@ -40,18 +43,18 @@ impl WaitForCapacity {
 }
 
 impl Future for WaitForCapacity {
-    type Item = h2::SendStream<Bytes>;
-    type Error = ();
+    type Output = h2::SendStream<Bytes>;
 
-    fn poll(&mut self) -> Poll<Self::Item, ()> {
-        let _ = futures::try_ready!(self.stream().poll_capacity().map_err(|_| panic!()));
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::get_mut(self);
+        let _ = ready!(pinned.stream().poll_capacity(cx)).unwrap();
 
-        let act = self.stream().capacity();
+        let act = pinned.stream().capacity();
 
-        if act >= self.target {
-            return Ok(self.stream.take().unwrap().into());
+        if act >= pinned.target {
+            return Poll::Ready(pinned.stream.take().unwrap().into());
         }
 
-        Ok(Async::NotReady)
+        Poll::Pending
     }
 }

@@ -1,11 +1,10 @@
-
 // Re-export H2 crate
 pub use h2;
 
-pub use h2::*;
 pub use h2::client;
 pub use h2::frame::StreamId;
 pub use h2::server;
+pub use h2::*;
 
 // Re-export mock
 pub use super::mock::{self, HandleFutureExt};
@@ -23,21 +22,22 @@ pub use super::util;
 pub use super::{Codec, SendFrame};
 
 // Re-export macros
-pub use super::{assert_ping, assert_data, assert_headers, assert_closed,
-                raw_codec, poll_frame, poll_err};
+pub use super::{
+    assert_closed, assert_data, assert_headers, assert_ping, poll_err, poll_frame, raw_codec,
+};
 
 // Re-export useful crates
-pub use {bytes, env_logger, futures, http, tokio::io};
 pub use super::mock_io;
+pub use {bytes, env_logger, futures, http, tokio::io as tokio_io};
 
 // Re-export primary future types
-pub use futures::{Future, IntoFuture, Sink, Stream};
+pub use futures::{Future, Sink, Stream};
 
 // And our Future extensions
 pub use super::future_ext::{FutureExt, Unwrap};
 
 // Our client_ext helpers
-pub use super::client_ext::{SendRequestExt};
+pub use super::client_ext::SendRequestExt;
 
 // Re-export HTTP types
 pub use http::{uri, HeaderMap, Method, Request, Response, StatusCode, Version};
@@ -69,28 +69,30 @@ impl MockH2 for super::mock_io::Builder {
 }
 
 pub trait ClientExt {
-    fn run<F: Future>(&mut self, f: F) -> Result<F::Item, F::Error>;
+    fn run<F: Future<Output = Result<V, E>> + Unpin, V, E>(&mut self, f: F) -> F::Output;
 }
 
 impl<T, B> ClientExt for client::Connection<T, B>
 where
-    T: AsyncRead + AsyncWrite + 'static,
-    B: IntoBuf + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
+    B: IntoBuf + Unpin + 'static,
+    B::Buf: Unpin,
 {
-    fn run<F: Future>(&mut self, f: F) -> Result<F::Item, F::Error> {
-        use futures::future;
+    fn run<F: Future<Output = Result<V, E>> + Unpin, V, E>(&mut self, f: F) -> F::Output {
         use futures::future::Either::*;
+        use futures::future::{self, FutureExt};
 
-        let res = future::poll_fn(|| self.poll()).select2(f).wait();
+        let res = future::select(Box::pin(async { self.await }).fuse(), f.fuse());
 
+        let res = futures::executor::block_on(res);
         match res {
-            Ok(A((_, b))) => {
+            Left((Ok(_), b)) => {
                 // Connection is done...
-                b.wait()
-            },
-            Ok(B((v, _))) => return Ok(v),
-            Err(A((e, _))) => panic!("err: {:?}", e),
-            Err(B((e, _))) => return Err(e),
+                futures::executor::block_on(b)
+            }
+            Right((Ok(v), _)) => return Ok(v),
+            Left((Err(e), _)) => panic!("err: {:?}", e),
+            Right((Err(e), _)) => return Err(e),
         }
     }
 }
