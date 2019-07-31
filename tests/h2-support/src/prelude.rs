@@ -7,7 +7,7 @@ pub use h2::server;
 pub use h2::*;
 
 // Re-export mock
-pub use super::mock::{self, HandleFutureExt};
+pub use super::mock::{self, idle_ms, HandleFutureExt};
 
 // Re-export frames helpers
 pub use super::frames;
@@ -23,8 +23,11 @@ pub use super::{Codec, SendFrame};
 
 // Re-export macros
 pub use super::{
-    assert_closed, assert_data, assert_headers, assert_ping, poll_err, poll_frame, raw_codec,
+    assert_closed, assert_data, assert_default_settings, assert_headers, assert_ping, poll_err,
+    poll_frame, raw_codec,
 };
+
+pub use super::assert::assert_frame_eq;
 
 // Re-export useful crates
 pub use super::mock_io;
@@ -69,7 +72,7 @@ impl MockH2 for super::mock_io::Builder {
 }
 
 pub trait ClientExt {
-    fn run<F: Future<Output = Result<V, E>> + Unpin, V, E>(&mut self, f: F) -> F::Output;
+    fn run<F: Future + Unpin>(&mut self, f: F) -> F::Output;
 }
 
 impl<T, B> ClientExt for client::Connection<T, B>
@@ -78,11 +81,11 @@ where
     B: IntoBuf + Unpin + 'static,
     B::Buf: Unpin,
 {
-    fn run<F: Future<Output = Result<V, E>> + Unpin, V, E>(&mut self, f: F) -> F::Output {
+    fn run<F: Future + Unpin>(&mut self, f: F) -> F::Output {
         use futures::future::Either::*;
         use futures::future::{self, FutureExt};
 
-        let res = future::select(Box::pin(async { self.await }).fuse(), f.fuse());
+        let res = future::select(self.fuse(), f.fuse());
 
         let res = futures::executor::block_on(res);
         match res {
@@ -90,9 +93,8 @@ where
                 // Connection is done...
                 futures::executor::block_on(b)
             }
-            Right((Ok(v), _)) => return Ok(v),
+            Right((v, _)) => return v,
             Left((Err(e), _)) => panic!("err: {:?}", e),
-            Right((Err(e), _)) => return Err(e),
         }
     }
 }

@@ -24,6 +24,19 @@ pub fn yield_once() -> impl Future<Output=()> {
     })
 }
 
+pub fn yield_once_ok() -> impl Future<Output=Result<(), ()>> {
+    let mut yielded = false;
+    futures::future::poll_fn(move |cx| {
+        if yielded {
+           Poll::Ready(Ok(()))
+        } else {
+            yielded = true;
+            cx.waker().clone().wake();
+            Poll::Pending
+        }
+    })
+}
+
 pub fn wait_for_capacity(stream: h2::SendStream<Bytes>, target: usize) -> WaitForCapacity {
     WaitForCapacity {
         stream: Some(stream),

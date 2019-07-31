@@ -1,7 +1,10 @@
-use h2_support::prelude::*;
+#![feature(async_await)]
 
-#[test]
-fn recv_trailers_only() {
+use h2_support::prelude::*;
+use futures::StreamExt;
+
+#[tokio::test]
+async fn recv_trailers_only() {
     let _ = env_logger::try_init();
 
     let mock = mock_io::Builder::new()
@@ -19,7 +22,7 @@ fn recv_trailers_only() {
         ])
         .build();
 
-    let (mut client, mut h2) = client::handshake(mock).wait().unwrap();
+    let (mut client, mut h2) = client::handshake(mock).await.unwrap();
 
     // Send the request
     let request = Request::builder()
@@ -36,18 +39,18 @@ fn recv_trailers_only() {
     let (_, mut body) = response.into_parts();
 
     // Make sure there is no body
-    let chunk = h2.run(poll_fn(|| body.poll())).unwrap();
+    let chunk = h2.run(Box::pin(async { body.next().await }));
     assert!(chunk.is_none());
 
-    let trailers = h2.run(poll_fn(|| body.poll_trailers())).unwrap().unwrap();
+    let trailers = h2.run(poll_fn(|cx| body.poll_trailers(cx))).unwrap().unwrap();
     assert_eq!(1, trailers.len());
     assert_eq!(trailers["status"], "ok");
 
-    h2.wait().unwrap();
+    h2.await.unwrap();
 }
 
-#[test]
-fn send_trailers_immediately() {
+#[tokio::test]
+async fn send_trailers_immediately() {
     let _ = env_logger::try_init();
 
     let mock = mock_io::Builder::new()
@@ -67,7 +70,7 @@ fn send_trailers_immediately() {
         ])
         .build();
 
-    let (mut client, mut h2) = client::handshake(mock).wait().unwrap();
+    let (mut client, mut h2) = client::handshake(mock).await.unwrap();
 
     // Send the request
     let request = Request::builder()
@@ -89,16 +92,15 @@ fn send_trailers_immediately() {
     let (_, mut body) = response.into_parts();
 
     // There is a data chunk
-    let chunk = h2.run(poll_fn(|| body.poll())).unwrap();
-    assert!(chunk.is_some());
+    let _ = h2.run(Box::pin(async { body.next().await })).unwrap().unwrap();
 
-    let chunk = h2.run(poll_fn(|| body.poll())).unwrap();
+    let chunk = h2.run(Box::pin(async { body.next().await }));
     assert!(chunk.is_none());
 
-    let trailers = h2.run(poll_fn(|| body.poll_trailers())).unwrap();
+    let trailers = h2.run(poll_fn(|cx| body.poll_trailers(cx)));
     assert!(trailers.is_none());
 
-    h2.wait().unwrap();
+    h2.await.unwrap();
 }
 
 #[test]
