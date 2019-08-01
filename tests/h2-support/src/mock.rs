@@ -141,6 +141,27 @@ impl Handle {
         assert!(frame.is_none());
     }
 
+    pub async fn send_bytes(&mut self, data: &[u8]) {
+        use bytes::Buf;
+        use std::io::Cursor;
+
+        let buf: Vec<_> = data.into();
+        let mut buf = Cursor::new(buf);
+
+        poll_fn(move |cx| {
+            while buf.has_remaining() {
+                let res = Pin::new(self.codec.get_mut())
+                    .poll_write_buf(cx, &mut buf)
+                    .map_err(|e| panic!("write err={:?}", e));
+
+                ready!(res).unwrap();
+            }
+
+            Poll::Ready(())
+        })
+        .await;
+    }
+
     /// Perform the H2 handshake
     pub async fn assert_client_handshake_with_settings<T>(&mut self, settings: T) -> frame::Settings
     where

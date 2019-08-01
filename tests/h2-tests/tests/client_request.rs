@@ -114,7 +114,7 @@ async fn request_stream_id_overflows() {
 
         // first request is allowed
         let (response, _) = client.send_request(request, true).unwrap();
-        let _x = h2.drive(response).await;
+        let _x = h2.drive(response).await.unwrap();
 
         let request = Request::builder()
             .method(Method::GET)
@@ -180,7 +180,7 @@ async fn client_builder_max_concurrent_streams() {
             .body(())
             .unwrap();
         let (response, _) = client.send_request(request, true).unwrap();
-        h2.drive(response).await;
+        h2.drive(response).await.unwrap();
     };
 
     join(h2, srv).await;
@@ -230,7 +230,7 @@ async fn request_over_max_concurrent_streams_errors() {
             .unwrap();
         // first request is allowed
         let (response, _) = client.send_request(request, true).unwrap();
-        h2.drive(response).await;
+        h2.drive(response).await.unwrap();
 
         let request = Request::builder()
             .method(Method::POST)
@@ -274,7 +274,6 @@ async fn request_over_max_concurrent_streams_errors() {
             stream2
                 .send_data("hello".into(), true)
                 .expect("req2 send_data");
-            Ok::<(), ()>(())
         }))
         .await;
         join(async { h2.await.unwrap() }, async { resp2.await.unwrap() }).await;
@@ -325,7 +324,7 @@ async fn send_request_poll_ready_when_connection_error() {
 
         // first request is allowed
         let (response, _) = client.send_request(request, true).unwrap();
-        h2.drive(response).await;
+        h2.drive(response).await.unwrap();
 
         let request = Request::builder()
             .method(Method::POST)
@@ -400,7 +399,7 @@ async fn send_reset_notifies_recv_stream() {
 
         // first request is allowed
         let (resp1, mut tx) = client.send_request(request, false).unwrap();
-        let res = conn.drive(resp1).await;
+        let res = conn.drive(resp1).await.unwrap();
 
         let tx = async {
             tx.send_reset(h2::Reason::REFUSED_STREAM);
@@ -420,9 +419,8 @@ async fn send_reset_notifies_recv_stream() {
         unordered.push(Box::pin(rx));
         unordered.push(Box::pin(tx));
 
-        conn.drive(Box::pin(async {
-            while let Some(_) = unordered.next().await {}
-        }));
+        conn.drive(Box::pin(unordered.for_each(|_| async { () })))
+            .await;
         drop(client); // now let client gracefully goaway
         conn.await.expect("client");
     };
@@ -454,7 +452,7 @@ async fn http_11_request_without_scheme_or_authority() {
             .unwrap();
 
         let (response, _) = client.send_request(request, true).unwrap();
-        h2.drive(response).await;
+        h2.drive(response).await.unwrap();
     };
 
     join(h2, srv).await;
@@ -610,7 +608,6 @@ async fn connection_close_notifies_client_poll_ready() {
                 .await;
             let err = res.expect_err("response");
             assert_eq!(err.to_string(), "broken pipe");
-            Ok::<(), ()>(())
         };
 
         conn.drive(Box::pin(req)).await;
@@ -740,11 +737,7 @@ async fn recv_too_big_headers() {
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
         };
 
-        conn.drive(Box::pin(async {
-            join(req1, req2).await;
-            Ok::<(), ()>(())
-        }))
-        .await;
+        conn.drive(Box::pin(join(req1, req2))).await;
         conn.await.expect("client");
     };
     join(client, srv).await;
@@ -808,7 +801,6 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
         let response = async {
             let err = response.await.expect_err("response");
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
-            Ok::<(), ()>(())
         };
 
         // Send the data
@@ -846,7 +838,7 @@ async fn request_without_path() {
 
         let (response, _) = client.send_request(request, true).unwrap();
 
-        conn.drive(response).await;
+        conn.drive(response).await.unwrap();
     };
 
     join(client, srv).await;
@@ -886,7 +878,7 @@ async fn request_options_with_star() {
 
         let (response, _) = client.send_request(request, true).unwrap();
 
-        conn.drive(response).await;
+        conn.drive(response).await.unwrap();
     };
 
     join(client, srv).await;
@@ -1002,7 +994,10 @@ async fn send_stream_poll_reset() {
             .unwrap();
 
         let (_response, mut tx) = client.send_request(request, false).unwrap();
-        let reason = conn.drive(poll_fn(move |cx| tx.poll_reset(cx))).await;
+        let reason = conn
+            .drive(poll_fn(move |cx| tx.poll_reset(cx)))
+            .await
+            .unwrap();
         assert_eq!(reason, Reason::REFUSED_STREAM);
     };
 

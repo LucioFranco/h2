@@ -1,5 +1,5 @@
 use futures::ready;
-use futures::{FutureExt as _, TryFuture, TryFutureExt};
+use futures::{FutureExt as _, TryFuture};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -185,25 +185,22 @@ pub struct Drive<'a, T, U> {
 
 impl<'a, T, U> Future for Drive<'a, T, U>
 where
-    T: TryFuture + Unpin,
-    U: TryFuture + Unpin,
-    T::Error: fmt::Debug,
-    U::Error: fmt::Debug,
+    T: Future + Unpin,
+    U: Future + Unpin,
 {
-    type Output = U::Ok;
+    type Output = U::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut looped = false;
         let pinned = Pin::get_mut(self);
         loop {
-            match pinned.future.try_poll_unpin(cx) {
-                Poll::Ready(Ok(val)) => return Poll::Ready(val),
+            match pinned.future.poll_unpin(cx) {
+                Poll::Ready(val) => return Poll::Ready(val),
                 Poll::Pending => {}
-                Poll::Ready(Err(e)) => panic!("unexpected error; {:?}", e),
             }
 
-            match pinned.driver.try_poll_unpin(cx) {
-                Poll::Ready(Ok(_)) => {
+            match pinned.driver.poll_unpin(cx) {
+                Poll::Ready(_) => {
                     if looped {
                         // Try polling the future one last time
                         panic!("driver resolved before future")
@@ -213,7 +210,6 @@ where
                     }
                 }
                 Poll::Pending => {}
-                Poll::Ready(Err(e)) => panic!("unexpected error; {:?}", e),
             }
 
             return Poll::Pending;

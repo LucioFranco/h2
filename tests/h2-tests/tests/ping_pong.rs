@@ -112,7 +112,7 @@ async fn user_ping_pong() {
     let client = async {
         let (client, mut conn) = client::handshake(io).await.expect("client handshake");
         // yield once so we can ack server settings
-        conn.drive(util::yield_once_ok()).await;
+        conn.drive(util::yield_once()).await;
         // `ping_pong()` method conflict with mock future ext trait.
         let mut ping_pong = client::Connection::ping_pong(&mut conn).expect("taking ping_pong");
         ping_pong.send_ping(Ping::opaque()).expect("send ping");
@@ -128,9 +128,10 @@ async fn user_ping_pong() {
         );
 
         conn.drive(futures::future::poll_fn(move |cx| ping_pong.poll_pong(cx)))
-            .await;
+            .await
+            .unwrap();
         drop(client);
-        conn.await.expect("client")
+        conn.await.expect("client");
     };
 
     future::join(client, srv).await;
@@ -148,7 +149,7 @@ async fn user_notifies_when_connection_closes() {
     let client = async {
         let (_client, mut conn) = client::handshake(io).await.expect("client handshake");
         // yield once so we can ack server settings
-        conn.drive(util::yield_once_ok()).await;
+        conn.drive(util::yield_once()).await;
         conn
     };
 

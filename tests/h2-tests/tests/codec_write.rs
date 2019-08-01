@@ -45,7 +45,6 @@ async fn write_continuation_frames() {
                 .await;
             let response = res.unwrap();
             assert_eq!(response.status(), StatusCode::NO_CONTENT);
-            Ok::<(), ()>(())
         });
 
         conn.drive(req).await;

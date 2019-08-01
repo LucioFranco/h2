@@ -307,15 +307,13 @@ async fn graceful_shutdown() {
 
             let rsp = http::Response::builder().status(200).body(()).unwrap();
             stream.send_response(rsp, true).unwrap();
-            Ok::<(), ()>(())
         });
 
         let mut srv = Box::pin(async {
             assert!(srv.next().await.is_none(), "unexpected request");
-            Ok::<(), ()>(())
         });
         srv.drive(body).await;
-        srv.await.expect("srv");
+        srv.await;
     };
 
     future::join(srv, client).await;

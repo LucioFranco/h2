@@ -182,7 +182,6 @@ async fn read_continuation_frames() {
                     map
                 });
             assert_eq!(head.headers, expected);
-            Ok::<(), ()>(())
         });
 
         conn.drive(req).await;
