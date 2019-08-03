@@ -7,7 +7,7 @@ pub use h2::server;
 pub use h2::*;
 
 // Re-export mock
-pub use super::mock::{self, idle_ms, HandleFutureExt};
+pub use super::mock::{self, idle_ms};
 
 // Re-export frames helpers
 pub use super::frames;

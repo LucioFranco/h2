@@ -37,7 +37,7 @@ async fn write_continuation_frames() {
 
         let request = request.body(()).unwrap();
 
-        let req = Box::pin(async {
+        let req = async {
             let res = client
                 .send_request(request, true)
                 .expect("send_request1")
@@ -45,7 +45,7 @@ async fn write_continuation_frames() {
                 .await;
             let response = res.unwrap();
             assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        });
+        };
 
         conn.drive(req).await;
         conn.await.unwrap();

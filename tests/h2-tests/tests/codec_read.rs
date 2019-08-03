@@ -165,7 +165,7 @@ async fn read_continuation_frames() {
             .body(())
             .unwrap();
 
-        let req = Box::pin(async {
+        let req = async {
             let res = client
                 .send_request(request, true)
                 .expect("send_request")
@@ -182,7 +182,7 @@ async fn read_continuation_frames() {
                     map
                 });
             assert_eq!(head.headers, expected);
-        });
+        };
 
         conn.drive(req).await;
         conn.await.expect("client");

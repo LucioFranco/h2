@@ -1,23 +1,21 @@
-use crate::{FutureExt, SendFrame};
+use crate::SendFrame;
 
 use h2::frame::{self, Frame};
 use h2::{self, RecvError, SendError};
 
-use futures::channel::oneshot;
 use futures::future::poll_fn;
-use futures::{ready, FutureExt as FutureExt_, Stream, StreamExt, TryFutureExt};
+use futures::{ready, Stream, StreamExt};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::timer::Delay;
 
 use super::assert::assert_frame_eq;
 use futures::executor::block_on;
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
-use std::{cmp, fmt, io, usize};
+use std::{cmp, io, usize};
 
 /// A mock I/O
 #[derive(Debug)]
@@ -127,12 +125,6 @@ impl Handle {
         Ok(())
     }
 
-    /// Perform the H2 handshake
-    pub async fn assert_client_handshake(&mut self) -> frame::Settings {
-        self.assert_client_handshake_with_settings(frame::Settings::default())
-            .await
-    }
-
     pub async fn recv_frame<F: Into<Frame>>(&mut self, expected: F) {
         let frame = self.next().await.unwrap().unwrap();
         assert_frame_eq(frame, expected);
@@ -166,6 +158,12 @@ impl Handle {
             Poll::Ready(())
         })
         .await;
+    }
+
+    /// Perform the H2 handshake
+    pub async fn assert_client_handshake(&mut self) -> frame::Settings {
+        self.assert_client_handshake_with_settings(frame::Settings::default())
+            .await
     }
 
     /// Perform the H2 handshake
@@ -484,239 +482,6 @@ impl AsyncWrite for Pipe {
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
-    }
-}
-
-pub trait HandleFutureExt {
-    fn ignore_settings<E>(self) -> Pin<Box<dyn Future<Output = Handle>>>
-    where
-        Self: Sized + Unpin + 'static,
-        Self: Future<Output = Result<(frame::Settings, Handle), E>>,
-        E: fmt::Debug,
-    {
-        Box::pin(
-            self.map(|result| result.map(|(_settings, handle)| handle))
-                .unwrap(),
-        )
-    }
-
-    fn send_bytes<E>(self, data: &[u8]) -> Pin<Box<dyn Future<Output = Result<Handle, E>>>>
-    where
-        Self: Future<Output = Result<Handle, E>> + Sized + 'static,
-        E: fmt::Debug,
-    {
-        use bytes::Buf;
-        use std::io::Cursor;
-
-        let buf: Vec<_> = data.into();
-        let mut buf = Cursor::new(buf);
-
-        Box::pin(self.and_then(move |handle| {
-            let mut handle = Some(handle);
-
-            poll_fn(move |cx| {
-                while buf.has_remaining() {
-                    let res = Pin::new(handle.as_mut().unwrap().codec.get_mut())
-                        .poll_write_buf(cx, &mut buf)
-                        .map_err(|e| panic!("write err={:?}", e));
-
-                    ready!(res)?;
-                }
-
-                Poll::Ready(Ok(handle.take().unwrap().into()))
-            })
-        }))
-    }
-
-    fn buffer_bytes<E>(self, num: usize) -> Pin<Box<dyn Future<Output = Result<Handle, E>>>>
-    where
-        Self: Sized + 'static,
-        Self: Future<Output = Result<Handle, E>>,
-        E: fmt::Debug,
-    {
-        Box::pin(self.and_then(move |mut handle| {
-            // Set tx_rem to num
-            {
-                let mut i = handle.codec.get_mut().inner.lock().unwrap();
-                i.tx_rem = num;
-            }
-
-            let mut handle = Some(handle);
-
-            poll_fn(move |cx| {
-                {
-                    let mut inner = handle
-                        .as_mut()
-                        .unwrap()
-                        .codec
-                        .get_mut()
-                        .inner
-                        .lock()
-                        .unwrap();
-
-                    if inner.tx_rem == 0 {
-                        inner.tx_rem = usize::MAX;
-                    } else {
-                        inner.tx_task = Some(cx.waker().clone());
-                        return Poll::Pending;
-                    }
-                }
-
-                Poll::Ready(Ok(handle.take().unwrap().into()))
-            })
-        }))
-    }
-
-    fn unbounded_bytes<E>(self) -> Pin<Box<dyn Future<Output = Result<Handle, E>>>>
-    where
-        Self: Sized + 'static,
-        Self: Future<Output = Result<Handle, E>>,
-        E: fmt::Debug,
-    {
-        Box::pin(async {
-            match self.await {
-                Ok(mut handle) => {
-                    {
-                        let mut i = handle.codec.get_mut().inner.lock().unwrap();
-                        i.tx_rem = usize::MAX;
-
-                        if let Some(task) = i.tx_rem_task.take() {
-                            task.wake();
-                        }
-                    }
-                    Ok(handle)
-                }
-                Err(e) => Err(e),
-            }
-        })
-    }
-
-    fn then_notify(self, tx: oneshot::Sender<()>) -> Pin<Box<dyn Future<Output = Self::Output>>>
-    where
-        Self: Future + Sized + 'static,
-    {
-        Box::pin(async {
-            let handle = self.await;
-            tx.send(()).unwrap();
-            handle
-        })
-    }
-
-    fn wait_for<F>(self, other: F) -> Pin<Box<dyn Future<Output = Self::Output>>>
-    where
-        F: Future + 'static,
-        Self: Future + Sized + 'static,
-    {
-        Box::pin(async {
-            let result = self.await;
-            other.await;
-            result
-        })
-    }
-
-    fn close(self) -> Pin<Box<dyn Future<Output = ()>>>
-    where
-        Self: Future<Output = ()> + Sized + 'static,
-    {
-        Box::pin(self.map(drop))
-    }
-}
-
-pub struct RecvFrame<T> {
-    inner: T,
-    frame: Option<Frame>,
-}
-
-impl<T, E> Future for RecvFrame<T>
-where
-    T: Future<Output = Result<(Option<Frame>, Handle), E>> + Unpin,
-    E: fmt::Debug,
-{
-    type Output = Handle;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        use self::Frame::Data;
-
-        let pinned = Pin::get_mut(self);
-        let (frame, handle) = ready!(pinned.inner.poll_unpin(cx)).unwrap();
-
-        match (frame, &pinned.frame) {
-            (Some(Data(ref a)), &Some(Data(ref b))) => {
-                assert_eq!(
-                    a.payload().len(),
-                    b.payload().len(),
-                    "recv_frame data payload len"
-                );
-                assert_eq!(a, b, "recv_frame");
-            }
-            (ref a, b) => {
-                assert_eq!(a, b, "recv_frame");
-            }
-        }
-
-        Poll::Ready(handle)
-    }
-}
-
-pub struct Idle {
-    handle: Option<Handle>,
-    timeout: oneshot::Receiver<()>,
-}
-
-impl Future for Idle {
-    type Output = Result<Handle, ()>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        if Pin::new(&mut pinned.timeout).poll(cx).is_ready() {
-            return Poll::Ready(Ok(pinned.handle.take().unwrap()));
-        }
-
-        let res = ready!(Pin::new(&mut pinned.handle.as_mut().unwrap()).poll_next(cx));
-        panic!("Idle received unexpected frame on handle; frame={:?}", res);
-    }
-}
-
-impl<T> HandleFutureExt for T where T: Future + 'static {}
-
-pub trait IntoRecvFrame {
-    type Future: Future;
-    fn into_recv_frame(self, frame: Option<Frame>) -> RecvFrame<Self::Future>;
-}
-
-impl IntoRecvFrame for Handle {
-    type Future = ::futures::stream::StreamFuture<Self>;
-
-    fn into_recv_frame(self, frame: Option<Frame>) -> RecvFrame<Self::Future> {
-        RecvFrame {
-            inner: self.into_future(),
-            frame: frame,
-        }
-    }
-}
-
-impl<T, E> IntoRecvFrame for T
-where
-    T: Future<Output = Result<Handle, E>> + Unpin + 'static,
-    E: fmt::Debug,
-{
-    type Future = Pin<Box<dyn Future<Output = (Option<Frame>, Handle)>>>;
-
-    fn into_recv_frame(self, frame: Option<Frame>) -> RecvFrame<Self::Future> {
-        let into_fut = Box::pin(async {
-            let mut handle = self.await.unwrap();
-            let frame = handle.next().await;
-            let frame = if let Some(frame) = frame {
-                Some(frame.unwrap())
-            } else {
-                None
-            };
-            (frame, handle)
-        });
-        RecvFrame {
-            inner: into_fut,
-            frame: frame,
-        }
     }
 }
 

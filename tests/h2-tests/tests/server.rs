@@ -302,13 +302,13 @@ async fn graceful_shutdown() {
         assert_eq!(req.method(), &http::Method::POST);
         let body = req.into_parts().1;
 
-        let body = Box::pin(async {
+        let body = async {
             let buf = body.try_concat().await.unwrap();
             assert!(buf.is_empty());
 
             let rsp = http::Response::builder().status(200).body(()).unwrap();
             stream.send_response(rsp, true).unwrap();
-        });
+        };
 
         let mut srv = Box::pin(async {
             assert!(srv.next().await.is_none(), "unexpected request");
