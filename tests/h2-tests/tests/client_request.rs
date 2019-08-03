@@ -269,12 +269,12 @@ async fn request_over_max_concurrent_streams_errors() {
             .send_data("hello".into(), true)
             .expect("req send_data");
 
-        h2.drive(Box::pin(async {
+        h2.drive(async {
             resp1.await.expect("req");
             stream2
                 .send_data("hello".into(), true)
                 .expect("req2 send_data");
-        }))
+        })
         .await;
         join(async { h2.await.unwrap() }, async { resp2.await.unwrap() }).await;
     };
@@ -419,8 +419,7 @@ async fn send_reset_notifies_recv_stream() {
         unordered.push(Box::pin(rx));
         unordered.push(Box::pin(tx));
 
-        conn.drive(Box::pin(unordered.for_each(|_| async { () })))
-            .await;
+        conn.drive(unordered.for_each(|_| async { () })).await;
         drop(client); // now let client gracefully goaway
         conn.await.expect("client");
     };
@@ -610,7 +609,7 @@ async fn connection_close_notifies_client_poll_ready() {
             assert_eq!(err.to_string(), "broken pipe");
         };
 
-        conn.drive(Box::pin(req)).await;
+        conn.drive(req).await;
 
         let err = poll_fn(move |cx| client.poll_ready(cx))
             .await
@@ -737,7 +736,7 @@ async fn recv_too_big_headers() {
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
         };
 
-        conn.drive(Box::pin(join(req1, req2))).await;
+        conn.drive(join(req1, req2)).await;
         conn.await.expect("client");
     };
     join(client, srv).await;
@@ -806,7 +805,7 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
         // Send the data
         stream.send_data(payload[..].into(), true).unwrap();
 
-        conn.drive(Box::pin(response)).await;
+        conn.drive(response).await;
         conn.await.expect("client");
     };
 

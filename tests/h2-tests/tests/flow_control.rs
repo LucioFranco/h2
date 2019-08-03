@@ -1,5 +1,6 @@
 #![feature(async_await)]
-use futures::{future, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
+use futures::future::{join, join4};
 use h2_support::prelude::*;
 use h2_support::util::yield_once;
 
@@ -108,7 +109,7 @@ async fn release_capacity_sends_window_update() {
             assert_eq!(buf.len(), payload.len());
         };
 
-        future::join(
+        join(
             async {
                 h2.await.unwrap();
             },
@@ -116,7 +117,7 @@ async fn release_capacity_sends_window_update() {
         )
         .await
     };
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -161,9 +162,9 @@ async fn release_capacity_of_small_amount_does_not_send_window_update() {
             let buf = body.next().await;
             assert!(buf.is_none());
         };
-        future::join(async { h2.await.unwrap() }, req).await;
+        join(async { h2.await.unwrap() }, req).await;
     };
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[test]
@@ -231,9 +232,9 @@ async fn recv_data_overflows_connection_window() {
                 "protocol error: flow-control protocol violated"
             );
         };
-        future::join(conn, req).await;
+        join(conn, req).await;
     };
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -283,9 +284,9 @@ async fn recv_data_overflows_stream_window() {
             );
         };
 
-        future::join(async { conn.await.unwrap() }, req).await;
+        join(async { conn.await.unwrap() }, req).await;
     };
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[test]
@@ -364,11 +365,11 @@ async fn stream_error_release_connection_capacity() {
             cap.release_capacity(to_release).expect("release_capacity");
             Ok::<(), ()>(())
         };
-        conn.drive(Box::pin(req)).await.unwrap();
+        conn.drive(req).await.unwrap();
         conn.await.expect("client");
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -440,7 +441,7 @@ async fn stream_close_by_data_frame_releases_capacity() {
         srv.recv_frame(frames::data(1, &b""[..]).eos()).await;
         srv.recv_frame(frames::data(3, &b"hello"[..]).eos()).await;
     };
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -513,7 +514,7 @@ async fn stream_close_by_trailers_frame_releases_capacity() {
         srv.recv_frame(frames::headers(1).eos()).await;
         srv.recv_frame(frames::data(3, &b"hello"[..]).eos()).await;
     };
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -562,7 +563,7 @@ async fn stream_close_by_send_reset_frame_releases_capacity() {
         conn.await.expect("client conn");
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[test]
@@ -611,7 +612,7 @@ async fn recv_window_update_on_stream_closed_by_data_frame() {
         srv.recv_frame(frames::data(1, "hello").eos()).await;
         srv.send_frame(frames::window_update(1, 5)).await;
     };
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -636,7 +637,7 @@ async fn reserved_capacity_assigned_in_multi_window_updates() {
         // Reserve more data than we want
         stream.reserve_capacity(10);
 
-        let mut stream = h2.drive(Box::pin(util::wait_for_capacity(stream, 5))).await;
+        let mut stream = h2.drive(util::wait_for_capacity(stream, 5)).await;
         stream.send_data("hello".into(), false).unwrap();
         stream.send_data("world".into(), true).unwrap();
 
@@ -674,7 +675,7 @@ async fn reserved_capacity_assigned_in_multi_window_updates() {
         .send_frame(frames::window_update(1, 5))
         */
     };
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -821,9 +822,7 @@ async fn recv_settings_removes_available_capacity() {
 
         stream.reserve_capacity(11);
 
-        let mut stream = h2
-            .drive(Box::pin(util::wait_for_capacity(stream, 11)))
-            .await;
+        let mut stream = h2.drive(util::wait_for_capacity(stream, 11)).await;
         assert_eq!(stream.capacity(), 11);
 
         stream.send_data("hello world".into(), true).unwrap();
@@ -835,7 +834,7 @@ async fn recv_settings_removes_available_capacity() {
         // Hold on to the `client` handle to avoid sending a GO_AWAY frame.
         h2.await.unwrap();
     };
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -877,10 +876,10 @@ async fn recv_settings_keeps_assigned_capacity() {
             let resp = response.await.expect("response");
             assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         };
-        future::join(async { h2.await.expect("h2") }, f).await;
+        join(async { h2.await.expect("h2") }, f).await;
     };
 
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -933,7 +932,7 @@ async fn recv_no_init_window_then_receive_some_init_window() {
         // Hold on to the `client` handle to avoid sending a GO_AWAY frame.
         h2.await.unwrap();
     };
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }
 
 #[tokio::test]
@@ -1056,7 +1055,7 @@ async fn client_increase_target_window_size() {
         conn.set_target_window_size(2 << 20);
         conn.await.unwrap();
     };
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -1097,7 +1096,7 @@ async fn increase_target_window_size_after_using_some() {
         conn.await.expect("client");
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -1142,7 +1141,7 @@ async fn decrease_target_window_size() {
         conn.await.expect("conn");
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -1163,7 +1162,7 @@ async fn server_target_window_size() {
         conn.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -1205,7 +1204,7 @@ async fn recv_settings_increase_window_size_after_using_some() {
         conn.await.expect("client");
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -1230,10 +1229,10 @@ async fn reserve_capacity_after_peer_closes() {
             .body(())
             .unwrap();
         let (resp, mut req_body) = client.send_request(request, false).unwrap();
-        conn.drive(Box::pin(async {
+        conn.drive(async {
             let result = resp.await;
             assert!(result.is_err());
-        }))
+        })
         .await;
         // As stated in #300, this would panic because the connection
         // had already been closed.
@@ -1241,7 +1240,7 @@ async fn reserve_capacity_after_peer_closes() {
         conn.await.expect("client");
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -1295,7 +1294,7 @@ async fn reset_stream_waiting_for_capacity() {
         send2.send_data(vec![0; 1].into(), true).unwrap();
         // .. and even more.
         send3.send_data(vec![0; 1].into(), true).unwrap();
-        future::join4(
+        join4(
             async { conn.await.expect("h2") },
             async { req1.await.expect("req1") },
             async { req2.await.unwrap_err() },
@@ -1304,7 +1303,7 @@ async fn reset_stream_waiting_for_capacity() {
         .await;
     };
 
-    future::join(client, srv).await;
+    join(client, srv).await;
 }
 
 #[tokio::test]
@@ -1351,8 +1350,8 @@ async fn data_padding() {
             let bytes = body.try_concat().await.unwrap();
             assert_eq!(bytes.len(), 100);
         };
-        future::join(async { conn.await.expect("client") }, fut).await;
+        join(async { conn.await.expect("client") }, fut).await;
     };
 
-    future::join(h2, srv).await;
+    join(h2, srv).await;
 }

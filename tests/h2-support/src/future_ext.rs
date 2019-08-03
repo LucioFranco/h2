@@ -61,7 +61,7 @@ pub trait FutureExt {
     {
         Drive {
             driver: self,
-            future: other,
+            future: Box::pin(other),
         }
     }
 
@@ -180,13 +180,13 @@ where
 /// This is useful for H2 futures that also require the connection to be polled.
 pub struct Drive<'a, T, U> {
     driver: &'a mut T,
-    future: U,
+    future: Pin<Box<U>>,
 }
 
 impl<'a, T, U> Future for Drive<'a, T, U>
 where
     T: Future + Unpin,
-    U: Future + Unpin,
+    U: Future,
 {
     type Output = U::Output;
 

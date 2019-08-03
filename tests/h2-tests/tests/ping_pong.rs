@@ -1,7 +1,8 @@
 #![feature(async_await)]
 
 use futures::channel::oneshot;
-use futures::{future, StreamExt, TryStreamExt};
+use futures::future::join;
+use futures::{StreamExt, TryStreamExt};
 use h2_support::assert_ping;
 use h2_support::prelude::*;
 
@@ -32,7 +33,7 @@ async fn recv_single_ping() {
         assert!(pong.is_ack());
     };
 
-    let _ = future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -54,7 +55,7 @@ async fn recv_multiple_pings() {
         s.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -92,7 +93,7 @@ async fn pong_has_highest_priority() {
         s.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -134,7 +135,7 @@ async fn user_ping_pong() {
         conn.await.expect("client");
     };
 
-    future::join(client, srv).await;
+    join(client, srv).await;
 }
 
 #[tokio::test]
@@ -153,7 +154,7 @@ async fn user_notifies_when_connection_closes() {
         conn
     };
 
-    let (mut client, srv) = future::join(client, srv).await;
+    let (mut client, srv) = join(client, srv).await;
 
     // `ping_pong()` method conflict with mock future ext trait.
     let mut ping_pong = client::Connection::ping_pong(&mut client).expect("taking ping_pong");

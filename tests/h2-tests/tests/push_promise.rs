@@ -1,5 +1,6 @@
 #![feature(async_await)]
-use futures::{future, StreamExt, TryStreamExt};
+use futures::{ StreamExt, TryStreamExt};
+use futures::future::join;
 use h2_support::prelude::*;
 
 #[tokio::test]
@@ -54,14 +55,11 @@ async fn recv_push_works() {
             assert_eq!(1, ps.len())
         };
 
-        h2.drive(Box::pin(future::join(
-            check_resp_status,
-            check_pushed_response,
-        )))
-        .await;
+        h2.drive(join(check_resp_status, check_pushed_response))
+            .await;
     };
 
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -124,12 +122,11 @@ async fn pushed_streams_arent_dropped_too_early() {
             assert_eq!(2, ps.len())
         };
 
-        h2.drive(Box::pin(future::join(check_status, check_pushed)))
-            .await;
+        h2.drive(join(check_status, check_pushed)).await;
         h2.await.expect("client");
     };
 
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -184,10 +181,10 @@ async fn recv_push_when_push_disabled_is_conn_error() {
             );
         };
 
-        future::join(conn, req).await;
+        join(conn, req).await;
     };
 
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -229,12 +226,12 @@ async fn pending_push_promises_reset_when_dropped() {
             assert_eq!(resp.status(), StatusCode::OK);
         };
 
-        let _ = conn.drive(Box::pin(req)).await;
+        let _ = conn.drive(req).await;
         conn.await.expect("client");
         drop(client);
     };
 
-    future::join(client, srv).await;
+    join(client, srv).await;
 }
 
 #[tokio::test]
@@ -281,10 +278,10 @@ async fn recv_push_promise_over_max_header_list_size() {
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
         };
 
-        conn.drive(Box::pin(req)).await;
+        conn.drive(req).await;
         conn.await.expect("client");
     };
-    future::join(client, srv).await;
+    join(client, srv).await;
 }
 
 #[tokio::test]
@@ -340,10 +337,10 @@ async fn recv_invalid_push_promise_headers_is_stream_protocol_error() {
             // CONTENT_LENGTH = 0 is ok
             assert_eq!(1, ps.len());
         };
-        h2.drive(Box::pin(check_pushed_response)).await;
+        h2.drive(check_pushed_response).await;
     };
 
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[test]
@@ -400,10 +397,10 @@ async fn recv_push_promise_skipped_stream_id() {
             );
         };
 
-        future::join(conn, req).await;
+        join(conn, req).await;
     };
 
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }
 
 #[tokio::test]
@@ -454,8 +451,8 @@ async fn recv_push_promise_dup_stream_id() {
             );
         };
 
-        future::join(conn, req).await;
+        join(conn, req).await;
     };
 
-    future::join(h2, mock).await;
+    join(h2, mock).await;
 }

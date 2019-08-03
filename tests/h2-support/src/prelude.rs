@@ -87,6 +87,7 @@ where
 
         let res = future::select(self.fuse(), f.fuse());
 
+        // This is not right
         let res = futures::executor::block_on(res);
         match res {
             Left((Ok(_), b)) => {

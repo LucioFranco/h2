@@ -1,7 +1,8 @@
 #![feature(async_await)]
 #![deny(warnings)]
 
-use futures::{future, StreamExt, TryStreamExt};
+use futures::future::{join, poll_fn};
+use futures::{StreamExt, TryStreamExt};
 use h2_support::prelude::*;
 use tokio::io::AsyncWriteExt;
 
@@ -67,7 +68,7 @@ async fn server_builder_set_max_concurrent_streams() {
         srv.next().await.unwrap().unwrap()
     };
 
-    future::join(h2, client).await;
+    join(h2, client).await;
 }
 
 #[tokio::test]
@@ -102,7 +103,7 @@ async fn serve_request() {
         srv.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[test]
@@ -133,7 +134,7 @@ async fn recv_invalid_authority() {
         srv.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -170,7 +171,7 @@ async fn recv_connection_header() {
         srv.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -201,7 +202,7 @@ async fn sends_reset_cancel_when_req_body_is_dropped() {
         srv.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -236,12 +237,12 @@ async fn abrupt_shutdown() {
 
         srv.abrupt_shutdown(Reason::INTERNAL_ERROR);
 
-        let srv_fut = future::poll_fn(move |cx| srv.poll_close(cx)).expect("server");
+        let srv_fut = poll_fn(move |cx| srv.poll_close(cx)).expect("server");
 
-        future::join(req_fut, srv_fut).await;
+        join(req_fut, srv_fut).await;
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -316,7 +317,7 @@ async fn graceful_shutdown() {
         srv.await;
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -367,7 +368,7 @@ async fn sends_reset_cancel_when_res_body_is_dropped() {
         srv.next().await.unwrap().unwrap()
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -403,7 +404,7 @@ async fn too_big_headers_sends_431() {
         assert!(req.is_none(), "req is {:?}", req);
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -438,7 +439,7 @@ async fn too_big_headers_sends_reset_after_431_if_not_eos() {
         assert!(req.is_none(), "req is {:?}", req);
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -470,15 +471,15 @@ async fn poll_reset() {
             let req = srv.next().await;
             assert!(req.is_none(), "no second request");
         };
-        future::join(conn, async {
-            let reason = future::poll_fn(move |cx| tx.poll_reset(cx))
+        join(conn, async {
+            let reason = poll_fn(move |cx| tx.poll_reset(cx))
                 .await
                 .expect("poll_reset");
             assert_eq!(reason, Reason::CANCEL);
         })
         .await;
     };
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -511,15 +512,15 @@ async fn poll_reset_io_error() {
             let req = srv.next().await;
             assert!(req.is_none(), "no second request");
         };
-        future::join(conn, async {
-            future::poll_fn(move |cx| tx.poll_reset(cx))
+        join(conn, async {
+            poll_fn(move |cx| tx.poll_reset(cx))
                 .await
                 .expect_err("poll_reset should error")
         })
         .await;
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -561,15 +562,15 @@ async fn poll_reset_after_send_response_is_user_error() {
         };
         tx.send_response(Response::new(()), false)
             .expect("response");
-        future::join(conn, async {
-            future::poll_fn(move |cx| tx.poll_reset(cx))
+        join(conn, async {
+            poll_fn(move |cx| tx.poll_reset(cx))
                 .await
                 .expect_err("poll_reset should error")
         })
         .await;
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }
 
 #[tokio::test]
@@ -617,5 +618,5 @@ async fn request_without_authority() {
         srv.next().await.unwrap().unwrap();
     };
 
-    future::join(srv, client).await;
+    join(srv, client).await;
 }

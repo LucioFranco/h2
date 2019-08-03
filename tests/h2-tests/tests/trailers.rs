@@ -39,7 +39,7 @@ async fn recv_trailers_only() {
     let (_, mut body) = response.into_parts();
 
     // Make sure there is no body
-    let chunk = h2.run(Box::pin(async { body.next().await }));
+    let chunk = h2.run(Box::pin(body.next()));
     assert!(chunk.is_none());
 
     let trailers = h2

@@ -105,7 +105,12 @@ impl Handle {
         self.codec.buffer(item).unwrap();
 
         // Flush the frame
-        poll_fn(|cx| self.codec.flush(cx)).await?;
+        poll_fn(|cx| {
+            let p = self.codec.flush(cx);
+            assert!(p.is_ready());
+            p
+        })
+        .await?;
         Ok(())
     }
 
@@ -118,6 +123,7 @@ impl Handle {
     pub async fn read_preface(&mut self) -> io::Result<()> {
         let mut buf = vec![0u8; PREFACE.len()];
         self.read_exact(&mut buf).await?;
+        assert_eq!(buf, PREFACE);
         Ok(())
     }
 
@@ -172,8 +178,7 @@ impl Handle {
         self.send(settings.into()).await.unwrap();
         self.read_preface().await.unwrap();
 
-        let frame = self.next().await;
-        let settings = match frame {
+        let settings = match self.next().await {
             Some(frame) => match frame.unwrap() {
                 Frame::Settings(settings) => {
                     // Send the ACK
@@ -193,8 +198,8 @@ impl Handle {
             }
         };
 
-        let frame = self.next().await;
-        let f = assert_settings!(frame.unwrap().unwrap());
+        let frame = self.next().await.unwrap().unwrap();
+        let f = assert_settings!(frame);
 
         // Is ACK
         assert!(f.is_ack());
@@ -243,9 +248,41 @@ impl Handle {
         settings
     }
 
-    pub async fn ping_pong<E: fmt::Debug>(&mut self, payload: [u8; 8]) {
+    pub async fn ping_pong(&mut self, payload: [u8; 8]) {
         self.send_frame(crate::frames::ping(payload)).await;
         self.recv_frame(crate::frames::ping(payload).pong()).await;
+    }
+
+    pub async fn buffer_bytes(&mut self, num: usize) {
+        // Set tx_rem to num
+        {
+            let mut i = self.codec.get_mut().inner.lock().unwrap();
+            i.tx_rem = num;
+        }
+
+        poll_fn(move |cx| {
+            {
+                let mut inner = self.codec.get_mut().inner.lock().unwrap();
+                if inner.tx_rem == 0 {
+                    inner.tx_rem = usize::MAX;
+                } else {
+                    inner.tx_task = Some(cx.waker().clone());
+                    return Poll::Pending;
+                }
+            }
+
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    pub async fn unbounded_bytes(&mut self) {
+        let mut i = self.codec.get_mut().inner.lock().unwrap();
+        i.tx_rem = usize::MAX;
+
+        if let Some(task) = i.tx_rem_task.take() {
+            task.wake();
+        }
     }
 }
 
