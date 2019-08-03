@@ -33,8 +33,8 @@ script:
   # Check with unstable flag
   - cargo check --features unstable
 
-  # Run tests, this includes lib tests (TODO: Enable doc tests (remove `--tests`) once docs are updated to std::future)
-  - RUST_TEST_THREADS=1 cargo test --tests
+  # Run tests, this includes lib tests and doc tests
+  - RUST_TEST_THREADS=1 cargo test
 
   # Run integration tests
   - cargo test -p h2-tests

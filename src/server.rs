@@ -64,50 +64,45 @@
 //! will use the HTTP/2.0 protocol without prior negotiation.
 //!
 //! ```rust
-//! use futures::{Future, Stream};
-//! # use futures::future::ok;
+//! #![feature(async_await)]
+//! use futures::StreamExt;
 //! use h2::server;
 //! use http::{Response, StatusCode};
 //! use tokio::net::TcpListener;
-//!
-//! pub fn main () {
+//! 
+//! #[tokio::main]
+//! pub async fn main ()  {
 //!     let addr = "127.0.0.1:5928".parse().unwrap();
 //!     let listener = TcpListener::bind(&addr,).unwrap();
 //!
-//!     tokio::run({
-//!         // Accept all incoming TCP connections.
-//!         listener.incoming().for_each(move |socket| {
-//!             // Spawn a new task to process each connection.
-//!             tokio::spawn({
-//!                 // Start the HTTP/2.0 connection handshake
-//!                 server::handshake(socket)
-//!                     .and_then(|h2| {
-//!                         // Accept all inbound HTTP/2.0 streams sent over the
-//!                         // connection.
-//!                         h2.for_each(|(request, mut respond)| {
-//!                             println!("Received request: {:?}", request);
+//!     // Accept all incoming TCP connections.
+//!     let mut incoming = listener.incoming();
+//!     # futures::future::select(Box::pin(async {
+//!     while let Some(socket) = incoming.next().await {
+//!         // Spawn a new task to process each connection.
+//!         tokio::spawn(async {
+//!             // Start the HTTP/2.0 connection handshake
+//!             let mut h2 = server::handshake(socket.unwrap()).await.unwrap();
+//!             // Accept all inbound HTTP/2.0 streams sent over the
+//!             // connection.
+//!             while let Some(request) = h2.next().await {
+//!                 let (request, mut respond) = request.unwrap();
+//!                 println!("Received request: {:?}", request);
 //!
-//!                             // Build a response with no body
-//!                             let response = Response::builder()
-//!                                 .status(StatusCode::OK)
-//!                                 .body(())
-//!                                 .unwrap();
+//!                 // Build a response with no body
+//!                 let response = Response::builder()
+//!                     .status(StatusCode::OK)
+//!                     .body(())
+//!                     .unwrap();
 //!
-//!                             // Send the response back to the client
-//!                             respond.send_response(response, true)
-//!                                 .unwrap();
+//!                 // Send the response back to the client
+//!                 respond.send_response(response, true)
+//!                         .unwrap();
+//!             }
 //!
-//!                             Ok(())
-//!                         })
-//!                     })
-//!                     .map_err(|e| panic!("unexpected error = {:?}", e))
-//!             });
-//!
-//!             Ok(())
-//!         })
-//!         .map_err(|e| panic!("failed to run HTTP/2.0 server: {:?}", e))
-//!  #      .select(ok(())).map(|_|()).map_err(|_|())
-//!     });
+//!         });
+//!     }
+//!     # }), Box::pin(async {})).await;
 //! }
 //! ```
 //!
@@ -182,21 +177,19 @@ pub struct Handshake<T, B: IntoBuf = Bytes> {
 /// # Examples
 ///
 /// ```
-/// # use futures::{Future, Stream};
+/// #![feature(async_await)]
+/// # use futures::StreamExt;
 /// # use tokio::io::*;
 /// # use h2::server;
 /// # use h2::server::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T) {
-/// server::handshake(my_io)
-///     .and_then(|server| {
-///         server.for_each(|(request, respond)| {
-///             // Process the request and send the response back to the client
-///             // using `respond`.
-///             # Ok(())
-///         })
-///     })
-/// # .wait().unwrap();
+/// # async fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T) {
+/// let mut server = server::handshake(my_io).await.unwrap();
+/// while let Some(request) = server.next().await {
+///     let (request, respond) = request.unwrap();
+///     // Process the request and send the response back to the client
+///     // using `respond`.
+/// }
 /// # }
 /// #
 /// # pub fn main() {}
@@ -227,7 +220,7 @@ pub struct Connection<T, B: IntoBuf> {
 /// # use tokio::io::*;
 /// # use h2::server::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+/// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
 /// # -> Handshake<T>
 /// # {
 /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -321,20 +314,16 @@ const PREFACE: [u8; 24] = *b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 /// # Examples
 ///
 /// ```
+/// #![feature(async_await)]
 /// # use tokio::io::*;
-/// # use futures::*;
 /// # use h2::server;
 /// # use h2::server::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+/// # async fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
 /// # {
-/// server::handshake(my_io)
-///     .and_then(|connection| {
-///         // The HTTP/2.0 handshake has completed, now use `connection` to
-///         // accept inbound HTTP/2.0 streams.
-///         # Ok(())
-///     })
-///     # .wait().unwrap();
+/// let connection = server::handshake(my_io).await.unwrap();
+/// // The HTTP/2.0 handshake has completed, now use `connection` to
+/// // accept inbound HTTP/2.0 streams.
 /// # }
 /// #
 /// # pub fn main() {}
@@ -473,8 +462,8 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let pinned = Pin::get_mut(self);
-        // Always try to advance the internal state. Getting NotReady also is
-        // needed to allow this function to return NotReady.
+        // Always try to advance the internal state. Getting Pending also is
+        // needed to allow this function to return Pending.
         match pinned.poll_close(cx)? {
             Poll::Ready(_) => {
                 // If the socket is closed, don't return anything
@@ -526,7 +515,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -565,7 +554,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -599,7 +588,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -632,7 +621,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -671,7 +660,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -719,7 +708,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -765,7 +754,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -812,7 +801,7 @@ impl Builder {
     /// # use h2::server::*;
     /// # use std::time::Duration;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -854,7 +843,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -874,7 +863,7 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::server::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite>(my_io: T)
+    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin>(my_io: T)
     /// # -> Handshake<T, &'static [u8]>
     /// # {
     /// // `server_fut` is a future representing the completion of the HTTP/2.0
@@ -953,7 +942,7 @@ impl<B: IntoBuf> SendResponse<B> {
 
     /// Polls to be notified when the client resets this stream.
     ///
-    /// If stream is still open, this returns `Ok(Async::NotReady)`, and
+    /// If stream is still open, this returns `Poll::Pending`, and
     /// registers the task to be notified if a `RST_STREAM` is received.
     ///
     /// If a `RST_STREAM` frame is received for this stream, calling this
@@ -1074,7 +1063,7 @@ impl<T, B: IntoBuf> Future for Handshake<T, B>
             // for the client preface.
             let codec = match Pin::new(flush).poll(cx)? {
                 Poll::Pending => {
-                    log::trace!("Handshake::poll(); flush.poll()=NotReady");
+                    log::trace!("Handshake::poll(); flush.poll()=Pending");
                     return Poll::Pending;
                 },
                 Poll::Ready(flushed) => {

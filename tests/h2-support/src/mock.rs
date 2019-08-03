@@ -47,7 +47,7 @@ struct Inner {
     /// Notify when data is written. This notifies the test case waiters.
     tx_task: Option<Waker>,
 
-    /// Number of bytes that can be written before `write` returns `NotReady`.
+    /// Number of bytes that can be written before `write` returns `Poll::Pending`.
     tx_rem: usize,
 
     /// Task to notify when write capacity becomes available.

@@ -3,7 +3,7 @@
 use h2_support::{DEFAULT_WINDOW_SIZE};
 use h2_support::prelude::*;
 use futures::future::join;
-use futures::{FutureExt as _, StreamExt};
+use futures::{FutureExt, StreamExt};
 use std::task::Context;
 
 #[tokio::test]

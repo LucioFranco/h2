@@ -1,56 +1,10 @@
-use futures::ready;
-use futures::{FutureExt as _, TryFuture};
-use std::fmt;
+use futures::FutureExt;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 /// Future extension helpers that are useful for tests
-pub trait FutureExt {
-    /// Panic on error
-    fn unwrap(self) -> Unwrap<Self>
-    where
-        Self: TryFuture + Sized,
-        Self::Error: fmt::Debug,
-    {
-        Unwrap { inner: self }
-    }
-
-    /// Panic on success, yielding the content of an `Err`.
-    fn unwrap_err(self) -> UnwrapErr<Self>
-    where
-        Self: TryFuture + Sized,
-        Self::Error: fmt::Debug,
-    {
-        UnwrapErr { inner: self }
-    }
-
-    /// Panic on success, with a message.
-    fn expect_err<T>(self, msg: T) -> ExpectErr<Self>
-    where
-        Self: TryFuture + Sized,
-        Self::Error: fmt::Debug,
-        T: fmt::Display,
-    {
-        ExpectErr {
-            inner: self,
-            msg: msg.to_string(),
-        }
-    }
-
-    /// Panic on error, with a message.
-    fn expect<T>(self, msg: T) -> Expect<Self>
-    where
-        Self: TryFuture + Sized,
-        Self::Error: fmt::Debug,
-        T: fmt::Display,
-    {
-        Expect {
-            inner: self,
-            msg: msg.to_string(),
-        }
-    }
-
+pub trait TestFuture : Future {
     /// Drive `other` by polling `self`.
     ///
     /// `self` must not resolve before `other` does.
@@ -65,113 +19,9 @@ pub trait FutureExt {
         }
     }
 
-    /// Wrap this future in one that will yield NotReady once before continuing.
-    ///
-    /// This allows the executor to poll other futures before trying this one
-    /// again.
-    fn yield_once(self) -> Box<dyn Future<Output = Self::Output>>
-    where
-        Self: Future + Sized + 'static,
-    {
-        Box::new(super::util::yield_once().then(move |_| self))
-    }
 }
 
-impl<T: Future> FutureExt for T {}
-
-// ===== Unwrap ======
-
-/// Panic on error
-pub struct Unwrap<T> {
-    inner: T,
-}
-
-impl<T> Future for Unwrap<T>
-where
-    T: TryFuture + Unpin,
-    T::Ok: fmt::Debug,
-    T::Error: fmt::Debug,
-{
-    type Output = T::Ok;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        let result = ready!(Pin::new(&mut pinned.inner).try_poll(cx));
-        Poll::Ready(result.unwrap())
-    }
-}
-
-// ===== UnwrapErr ======
-
-/// Panic on success.
-pub struct UnwrapErr<T> {
-    inner: T,
-}
-
-impl<T> Future for UnwrapErr<T>
-where
-    T: TryFuture + Unpin,
-    T::Ok: fmt::Debug,
-    T::Error: fmt::Debug,
-{
-    type Output = T::Error;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T::Error> {
-        let pinned = Pin::get_mut(self);
-        match ready!(Pin::new(&mut pinned.inner).try_poll(cx)) {
-            Ok(v) => panic!("Future::unwrap_err() on an Ok value: {:?}", v),
-            Err(e) => Poll::Ready(e),
-        }
-    }
-}
-
-// ===== Expect ======
-
-/// Panic on error
-pub struct Expect<T> {
-    inner: T,
-    msg: String,
-}
-
-impl<T> Future for Expect<T>
-where
-    T: TryFuture + Unpin,
-    T::Ok: fmt::Debug,
-    T::Error: fmt::Debug,
-{
-    type Output = T::Ok;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        let result = ready!(Pin::new(&mut pinned.inner).try_poll(cx));
-        Poll::Ready(result.expect(&pinned.msg))
-    }
-}
-
-// ===== ExpectErr ======
-
-/// Panic on success
-pub struct ExpectErr<T> {
-    inner: T,
-    msg: String,
-}
-
-impl<T> Future for ExpectErr<T>
-where
-    T: TryFuture + Unpin,
-    T::Ok: fmt::Debug,
-    T::Error: fmt::Debug,
-{
-    type Output = T::Error;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        match ready!(Pin::new(&mut pinned.inner).try_poll(cx)) {
-            Ok(v) => panic!("{}: {:?}", pinned.msg, v),
-            Err(e) => Poll::Ready(e),
-        }
-    }
-}
+impl<T: Future> TestFuture for T {}
 
 // ===== Drive ======
 

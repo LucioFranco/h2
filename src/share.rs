@@ -267,11 +267,12 @@ impl<B: IntoBuf> SendStream<B> {
     /// is sent. For example:
     ///
     /// ```rust
+    /// #![feature(async_await)]
     /// # use h2::*;
-    /// # fn doc(mut send_stream: SendStream<&'static [u8]>) {
+    /// # async fn doc(mut send_stream: SendStream<&'static [u8]>) {
     /// send_stream.reserve_capacity(100);
     ///
-    /// let capacity = send_stream.poll_capacity();
+    /// let capacity = futures::future::poll_fn(|cx| send_stream.poll_capacity(cx)).await;
     /// // capacity == 5;
     ///
     /// send_stream.send_data(b"hello", false).unwrap();
@@ -360,7 +361,7 @@ impl<B: IntoBuf> SendStream<B> {
 
     /// Polls to be notified when the client resets this stream.
     ///
-    /// If stream is still open, this returns `Ok(Async::NotReady)`, and
+    /// If stream is still open, this returns `Poll::Pending`, and
     /// registers the task to be notified if a `RST_STREAM` is received.
     ///
     /// If a `RST_STREAM` frame is received for this stream, calling this
@@ -560,8 +561,8 @@ impl PingPong {
     /// # Example
     ///
     /// ```
-    /// # use futures::Future;
-    /// # fn doc(mut ping_pong: h2::PingPong) {
+    /// #![feature(async_await)]
+    /// # async fn doc(mut ping_pong: h2::PingPong) {
     /// // let mut ping_pong = ...
     ///
     /// // First, send a PING.
@@ -570,9 +571,9 @@ impl PingPong {
     ///     .unwrap();
     ///
     /// // And then wait for the PONG.
-    /// futures::future::poll_fn(move || {
-    ///     ping_pong.poll_pong()
-    /// }).wait().unwrap();
+    /// futures::future::poll_fn(move |cx| {
+    ///     ping_pong.poll_pong(cx)
+    /// }).await.unwrap();
     /// # }
     /// # fn main() {}
     /// ```

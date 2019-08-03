@@ -1,7 +1,7 @@
 #![feature(async_await)]
 
 use futures::future::{join, select, Either};
-use futures::{FutureExt as _, StreamExt};
+use futures::{FutureExt, StreamExt};
 use h2_support::prelude::*;
 use std::pin::Pin;
 use std::task::Context;
@@ -345,9 +345,9 @@ async fn send_request_poll_ready_when_connection_error() {
         let (resp2, _) = client.send_request(request, true).unwrap();
 
         // third stream is over max concurrent
-        let until_ready = poll_fn(move |cx| client.poll_ready(cx))
-            .expect_err("client poll_ready")
-            .map(|_| ());
+        let until_ready = async {
+            poll_fn(move |cx| client.poll_ready(cx)).await.expect_err("client poll_ready");
+        };
 
         // a FuturesUnordered is used on purpose!
         //
@@ -569,7 +569,7 @@ async fn connection_close_notifies_response_future() {
             let err = res.expect_err("response");
             assert_eq!(err.to_string(), "broken pipe");
         };
-        join(conn.expect("conn"), req).await;
+        join(async { conn.await.expect("conn") }, req).await;
     };
 
     join(client, srv).await;
@@ -648,11 +648,14 @@ async fn sending_request_on_closed_connection() {
             .unwrap();
 
         // first request works
-        let req = client
+        let req = Box::pin(async {
+            client
             .send_request(request, true)
             .expect("send_request1")
             .0
+            .await
             .expect("response1");
+        });
 
         // after finish request1, there should be a conn error
         let h2 = Box::pin(async {
@@ -962,7 +965,7 @@ async fn notify_on_send_capacity() {
             done_tx.send(()).unwrap();
         });
 
-        conn.expect("h2")
+        conn.await.expect("h2");
     };
 
     join(client, srv).await;

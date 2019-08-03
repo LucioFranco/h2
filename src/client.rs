@@ -236,31 +236,20 @@ pub struct ReadySendRequest<B: IntoBuf> {
 /// # Examples
 ///
 /// ```
-/// # use futures::{Future, Stream};
-/// # use futures::future::Executor;
+/// #![feature(async_await)]
 /// # use tokio::io::*;
 /// # use h2::client;
 /// # use h2::client::*;
 /// #
-/// # fn doc<T, E>(my_io: T, my_executor: E)
-/// # where T: AsyncRead + AsyncWrite + Unpin + 'static,
-/// #       E: Executor<Box<Future<Item = (), Error = ()>>>,
+/// # async fn doc<T>(my_io: T)
+/// # where T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 /// # {
-/// client::handshake(my_io)
-///     .and_then(|(send_request, connection)| {
-///         // Submit the connection handle to an executor.
-///         my_executor.execute(
-///             # Box::new(
-///             connection.map_err(|_| panic!("connection failed"))
-///             # )
-///         ).unwrap();
+///     let (send_request, connection) = client::handshake(my_io).await.unwrap();
+///     // Submit the connection handle to an executor.
+///     tokio::spawn(async { connection.await.expect("connection failed"); });
 ///
-///         // Now, use `send_request` to initialize HTTP/2.0 streams.
-///         // ...
-///         # drop(send_request);
-///         # Ok(())
-///     })
-/// # .wait().unwrap();
+///     // Now, use `send_request` to initialize HTTP/2.0 streams.
+///     // ...
 /// # }
 /// #
 /// # pub fn main() {}
@@ -381,7 +370,7 @@ where
     /// stream.
     ///
     /// This function must return `Ready` before `send_request` is called. When
-    /// `NotReady` is returned, the task will be notified once the readiness
+    /// `Poll::Pending` is returned, the task will be notified once the readiness
     /// state changes.
     ///
     /// See [module] level docs for more details.
@@ -405,19 +394,15 @@ where
     /// # Examples
     ///
     /// ```rust
-    /// # use futures::*;
+    /// #![feature(async_await)]
     /// # use h2::client::*;
     /// # use http::*;
-    /// # fn doc(send_request: SendRequest<&'static [u8]>)
+    /// # async fn doc(send_request: SendRequest<&'static [u8]>)
     /// # {
     /// // First, wait until the `send_request` handle is ready to send a new
     /// // request
-    /// send_request.ready()
-    ///     .and_then(|mut send_request| {
-    ///         // Use `send_request` here.
-    ///         # Ok(())
-    ///     })
-    ///     # .wait().unwrap();
+    /// let mut send_request = send_request.ready().await.unwrap();
+    /// // Use `send_request` here.
     /// # }
     /// # pub fn main() {}
     /// ```
@@ -469,32 +454,24 @@ where
     /// Sending a request with no body
     ///
     /// ```rust
-    /// # use futures::*;
+    /// #![feature(async_await)]
     /// # use h2::client::*;
     /// # use http::*;
-    /// # fn doc(send_request: SendRequest<&'static [u8]>)
+    /// # async fn doc(send_request: SendRequest<&'static [u8]>)
     /// # {
     /// // First, wait until the `send_request` handle is ready to send a new
     /// // request
-    /// send_request.ready()
-    ///     .and_then(|mut send_request| {
-    ///         // Prepare the HTTP request to send to the server.
-    ///         let request = Request::get("https://www.example.com/")
-    ///             .body(())
-    ///             .unwrap();
+    /// let mut send_request = send_request.ready().await.unwrap();
+    /// // Prepare the HTTP request to send to the server.
+    /// let request = Request::get("https://www.example.com/")
+    ///     .body(())
+    ///     .unwrap();
     ///
-    ///         // Send the request to the server. Since we are not sending a
-    ///         // body or trailers, we can drop the `SendStream` instance.
-    ///         let (response, _) = send_request
-    ///             .send_request(request, true).unwrap();
-    ///
-    ///         response
-    ///     })
-    ///     .and_then(|response| {
-    ///         // Process the response
-    ///         # Ok(())
-    ///     })
-    ///     # .wait().unwrap();
+    /// // Send the request to the server. Since we are not sending a
+    /// // body or trailers, we can drop the `SendStream` instance.
+    /// let (response, _) = send_request.send_request(request, true).unwrap();
+    /// let response = response.await.unwrap();
+    /// // Process the response
     /// # }
     /// # pub fn main() {}
     /// ```
@@ -502,48 +479,43 @@ where
     /// Sending a request with a body and trailers
     ///
     /// ```rust
-    /// # use futures::*;
+    /// #![feature(async_await)]
     /// # use h2::client::*;
     /// # use http::*;
-    /// # fn doc(send_request: SendRequest<&'static [u8]>)
+    /// # async fn doc(send_request: SendRequest<&'static [u8]>)
     /// # {
     /// // First, wait until the `send_request` handle is ready to send a new
     /// // request
-    /// send_request.ready()
-    ///     .and_then(|mut send_request| {
-    ///         // Prepare the HTTP request to send to the server.
-    ///         let request = Request::get("https://www.example.com/")
-    ///             .body(())
-    ///             .unwrap();
+    /// let mut send_request = send_request.ready().await.unwrap();
+    /// 
+    /// // Prepare the HTTP request to send to the server.
+    /// let request = Request::get("https://www.example.com/")
+    ///     .body(())
+    ///     .unwrap();
     ///
-    ///         // Send the request to the server. If we are not sending a
-    ///         // body or trailers, we can drop the `SendStream` instance.
-    ///         let (response, mut send_stream) = send_request
-    ///             .send_request(request, false).unwrap();
+    /// // Send the request to the server. If we are not sending a
+    /// // body or trailers, we can drop the `SendStream` instance.
+    /// let (response, mut send_stream) = send_request
+    ///     .send_request(request, false).unwrap();
     ///
-    ///         // At this point, one option would be to wait for send capacity.
-    ///         // Doing so would allow us to not hold data in memory that
-    ///         // cannot be sent. However, this is not a requirement, so this
-    ///         // example will skip that step. See `SendStream` documentation
-    ///         // for more details.
-    ///         send_stream.send_data(b"hello", false).unwrap();
-    ///         send_stream.send_data(b"world", false).unwrap();
+    /// // At this point, one option would be to wait for send capacity.
+    /// // Doing so would allow us to not hold data in memory that
+    /// // cannot be sent. However, this is not a requirement, so this
+    /// // example will skip that step. See `SendStream` documentation
+    /// // for more details.
+    /// send_stream.send_data(b"hello", false).unwrap();
+    /// send_stream.send_data(b"world", false).unwrap();
     ///
-    ///         // Send the trailers.
-    ///         let mut trailers = HeaderMap::new();
-    ///         trailers.insert(
-    ///             header::HeaderName::from_bytes(b"my-trailer").unwrap(),
-    ///             header::HeaderValue::from_bytes(b"hello").unwrap());
+    /// // Send the trailers.
+    /// let mut trailers = HeaderMap::new();
+    /// trailers.insert(
+    ///     header::HeaderName::from_bytes(b"my-trailer").unwrap(),
+    ///     header::HeaderValue::from_bytes(b"hello").unwrap());
     ///
-    ///         send_stream.send_trailers(trailers).unwrap();
+    /// send_stream.send_trailers(trailers).unwrap();
     ///
-    ///         response
-    ///     })
-    ///     .and_then(|response| {
-    ///         // Process the response
-    ///         # Ok(())
-    ///     })
-    ///     # .wait().unwrap();
+    /// let response = response.await.unwrap();
+    /// // Process the response
     /// # }
     /// # pub fn main() {}
     /// ```
@@ -1140,21 +1112,17 @@ impl Default for Builder {
 /// # Examples
 ///
 /// ```
-/// # use futures::*;
+/// #![feature(async_await)]
 /// # use tokio::io::*;
 /// # use h2::client;
 /// # use h2::client::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
+/// # async fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
 /// # {
-/// client::handshake(my_io)
-///     .and_then(|(send_request, connection)| {
-///         // The HTTP/2.0 handshake has completed, now start polling
-///         // `connection` and use `send_request` to send requests to the
-///         // server.
-///         # Ok(())
-///     })
-///     # .wait().unwrap();
+/// let (send_request, connection) = client::handshake(my_io).await.unwrap();
+/// // The HTTP/2.0 handshake has completed, now start polling
+/// // `connection` and use `send_request` to send requests to the
+/// // server.
 /// # }
 /// #
 /// # pub fn main() {}

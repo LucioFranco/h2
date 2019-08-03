@@ -2,7 +2,7 @@
 #![deny(warnings)]
 
 use futures::future::{join, join3, lazy};
-use futures::{FutureExt as _, StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use h2_support::prelude::*;
 use h2_support::util::yield_once;
 use std::task::Poll;

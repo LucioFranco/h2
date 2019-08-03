@@ -87,7 +87,7 @@ async fn release_capacity_sends_window_update() {
             .unwrap();
 
         let req = async {
-            let resp = client.send_request(request, true).unwrap().0.unwrap().await;
+            let resp = client.send_request(request, true).unwrap().0.await.unwrap();
             // Get the response
             assert_eq!(resp.status(), StatusCode::OK);
             let mut body = resp.into_parts().1;

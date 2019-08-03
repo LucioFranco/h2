@@ -237,7 +237,9 @@ async fn abrupt_shutdown() {
 
         srv.abrupt_shutdown(Reason::INTERNAL_ERROR);
 
-        let srv_fut = poll_fn(move |cx| srv.poll_close(cx)).expect("server");
+        let srv_fut = async {
+            poll_fn(move |cx| srv.poll_close(cx)).await.expect("server");
+        };
 
         join(req_fut, srv_fut).await;
     };
