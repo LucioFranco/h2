@@ -172,9 +172,9 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 ///
 /// [module]: index.html
 #[must_use = "futures do nothing unless polled"]
-pub struct Handshake<T, B = Bytes> {
+pub struct Handshake<'a, T, B = Bytes> {
     builder: Builder,
-    inner: Pin<Box<dyn Future<Output = io::Result<T>>>>,
+    inner: Pin<Box<dyn Future<Output = io::Result<T>> + 'a>>,
     _marker: PhantomData<fn(B)>,
 }
 
@@ -317,8 +317,8 @@ pub struct PushPromises {
 /// # use tokio::io::*;
 /// # use h2::client::*;
 /// #
-/// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-/// # -> Handshake<T>
+/// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+/// # -> Handshake<'a, T>
 /// # {
 /// // `client_fut` is a future representing the completion of the HTTP/2.0
 /// // handshake.
@@ -487,7 +487,7 @@ where
     /// // First, wait until the `send_request` handle is ready to send a new
     /// // request
     /// let mut send_request = send_request.ready().await.unwrap();
-    /// 
+    ///
     /// // Prepare the HTTP request to send to the server.
     /// let request = Request::get("https://www.example.com/")
     ///     .body(())
@@ -629,8 +629,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -670,8 +670,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -704,8 +704,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -737,8 +737,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -776,8 +776,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -824,8 +824,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -864,8 +864,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -908,8 +908,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -953,8 +953,8 @@ impl Builder {
     /// # use h2::client::*;
     /// # use std::time::Duration;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -990,8 +990,8 @@ impl Builder {
     /// # use h2::client::*;
     /// # use std::time::Duration;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -1044,8 +1044,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -1064,8 +1064,8 @@ impl Builder {
     /// # use tokio::io::*;
     /// # use h2::client::*;
     /// #
-    /// # fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
-    /// # -> Handshake<T, &'static [u8]>
+    /// # fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
+    /// # -> Handshake<'a, T, &'static [u8]>
     /// # {
     /// // `client_fut` is a future representing the completion of the HTTP/2.0
     /// // handshake.
@@ -1076,9 +1076,9 @@ impl Builder {
     /// #
     /// # pub fn main() {}
     /// ```
-    pub fn handshake<T, B>(&self, io: T) -> Handshake<T, B>
+    pub fn handshake<'a, T, B>(&self, io: T) -> Handshake<'a, T, B>
     where
-        T: AsyncRead + AsyncWrite + Unpin + 'static,
+        T: AsyncRead + AsyncWrite + Unpin + 'a,
         B: IntoBuf + Unpin,
         B::Buf: Unpin + 'static,
     {
@@ -1117,7 +1117,7 @@ impl Default for Builder {
 /// # use h2::client;
 /// # use h2::client::*;
 /// #
-/// # async fn doc<T: AsyncRead + AsyncWrite + Unpin + 'static>(my_io: T)
+/// # async fn doc<'a, T: AsyncRead + AsyncWrite + Unpin + 'a>(my_io: T)
 /// # {
 /// let (send_request, connection) = client::handshake(my_io).await.unwrap();
 /// // The HTTP/2.0 handshake has completed, now start polling
@@ -1127,31 +1127,26 @@ impl Default for Builder {
 /// #
 /// # pub fn main() {}
 /// ```
-pub fn handshake<T>(io: T) -> Handshake<T, Bytes>
+pub fn handshake<'a, T>(io: T) -> Handshake<'a, T, Bytes>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
 {
     Builder::new().handshake(io)
 }
 
 // ===== impl Connection =====
 
-impl<T, B> Connection<T, B>
+impl<'a, T, B> Connection<T, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
     B: IntoBuf + Unpin,
     B::Buf: Unpin,
 {
-    fn handshake2(mut io: T, builder: Builder) -> Handshake<T, B> {
+    fn handshake2(mut io: T, builder: Builder) -> Handshake<'a, T, B> {
         log::debug!("binding client connection");
 
         let msg: &'static [u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-        let handshake = Box::pin(async move {
-            match io.write_all(msg).await {
-                Ok(_) => Ok(io),
-                Err(e) => Err(e),
-            }
-        });
+        let handshake = Box::pin(async move { io.write_all(msg).await.map(|_| io) });
 
         Handshake {
             builder,
@@ -1221,9 +1216,9 @@ where
 
 // ===== impl Handshake =====
 
-impl<T, B> Future for Handshake<T, B>
+impl<'a, T, B> Future for Handshake<'_, T, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
     B: IntoBuf + Unpin,
     B::Buf: Unpin + 'static,
 {
@@ -1279,7 +1274,7 @@ where
     }
 }
 
-impl<T, B> fmt::Debug for Handshake<T, B>
+impl<T, B> fmt::Debug for Handshake<'_, T, B>
 where
     T: AsyncRead + AsyncWrite,
     T: fmt::Debug,

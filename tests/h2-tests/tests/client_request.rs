@@ -1,7 +1,7 @@
 #![feature(async_await)]
 
 use futures::future::{join, select, Either};
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use h2_support::prelude::*;
 use std::pin::Pin;
 use std::task::Context;
@@ -346,7 +346,9 @@ async fn send_request_poll_ready_when_connection_error() {
 
         // third stream is over max concurrent
         let until_ready = async {
-            poll_fn(move |cx| client.poll_ready(cx)).await.expect_err("client poll_ready");
+            poll_fn(move |cx| client.poll_ready(cx))
+                .await
+                .expect_err("client poll_ready");
         };
 
         // a FuturesUnordered is used on purpose!
@@ -650,11 +652,11 @@ async fn sending_request_on_closed_connection() {
         // first request works
         let req = Box::pin(async {
             client
-            .send_request(request, true)
-            .expect("send_request1")
-            .0
-            .await
-            .expect("response1");
+                .send_request(request, true)
+                .expect("send_request1")
+                .0
+                .await
+                .expect("response1");
         });
 
         // after finish request1, there should be a conn error
@@ -891,13 +893,13 @@ async fn notify_on_send_capacity() {
     // This test ensures that the client gets notified when there is additional
     // send capacity. In other words, when the server is ready to accept a new
     // stream, the client is notified.
-    use std::sync::mpsc;
+    use futures::channel::mpsc;
 
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
     let (done_tx, done_rx) = futures::channel::oneshot::channel();
-    let (tx, rx) = mpsc::channel();
+    let (mut tx, mut rx) = mpsc::channel(1);
 
     let mut settings = frame::Settings::default();
     settings.set_max_concurrent_streams(Some(1));
@@ -906,7 +908,7 @@ async fn notify_on_send_capacity() {
         let settings = srv.assert_client_handshake_with_settings(settings).await;
         // This is the ACK
         assert_default_settings!(settings);
-        tx.send(()).unwrap();
+        tx.try_send(()).unwrap();
         srv.recv_frame(
             frames::headers(1)
                 .request("GET", "https://www.example.com/")
@@ -936,7 +938,7 @@ async fn notify_on_send_capacity() {
     let client = async {
         let (mut client, conn) = client::handshake(io).await.expect("handshake");
         tokio::spawn(async move {
-            rx.recv().unwrap();
+            rx.next().await.unwrap();
 
             let mut responses = vec![];
 
