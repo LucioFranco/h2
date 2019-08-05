@@ -1,27 +1,28 @@
 use h2;
 
-use string::{String, TryFrom};
 use bytes::Bytes;
-use std::future::Future;
-use std::task::{Poll, Context};
-use std::pin::Pin;
 use futures::ready;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use string::{String, TryFrom};
 
 pub fn byte_str(s: &str) -> String<Bytes> {
     String::try_from(Bytes::from(s)).unwrap()
 }
 
-pub fn yield_once() -> impl Future<Output=()> {
+pub async fn yield_once() {
     let mut yielded = false;
     futures::future::poll_fn(move |cx| {
         if yielded {
-           Poll::Ready(())
+            Poll::Ready(())
         } else {
             yielded = true;
             cx.waker().clone().wake();
             Poll::Pending
         }
     })
+    .await;
 }
 
 pub fn wait_for_capacity(stream: h2::SendStream<Bytes>, target: usize) -> WaitForCapacity {

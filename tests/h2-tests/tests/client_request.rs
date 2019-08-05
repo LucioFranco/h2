@@ -276,7 +276,10 @@ async fn request_over_max_concurrent_streams_errors() {
                 .expect("req2 send_data");
         })
         .await;
-        join(async move { h2.await.unwrap() }, async move { resp2.await.unwrap() }).await;
+        join(async move { h2.await.unwrap() }, async move {
+            resp2.await.unwrap()
+        })
+        .await;
     };
 
     join(h2, srv).await;
@@ -752,7 +755,8 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let payload = [0; (frame::DEFAULT_INITIAL_WINDOW_SIZE * 2) as usize];
+    let payload = vec![0; (frame::DEFAULT_INITIAL_WINDOW_SIZE * 2) as usize];
+    let payload_2 = payload.clone();
     let max_frame_size = frame::DEFAULT_MAX_FRAME_SIZE as usize;
 
     let srv = async move {
@@ -808,7 +812,7 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
         };
 
         // Send the data
-        stream.send_data(payload[..].into(), true).unwrap();
+        stream.send_data(payload_2[..].into(), true).unwrap();
 
         conn.drive(response).await;
         conn.await.expect("client");

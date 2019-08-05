@@ -34,7 +34,7 @@ async fn send_recv_headers_only() {
     log::info!("sending request");
     let (response, _) = client.send_request(request, true).unwrap();
 
-    let resp = h2.run(response).unwrap();
+    let resp = h2.run(response).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
     h2.await.unwrap();
@@ -84,14 +84,14 @@ async fn send_recv_data() {
     stream.send_data("hello", true).unwrap();
 
     // Get the response
-    let resp = h2.run(response).unwrap();
+    let resp = h2.run(response).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Take the body
     let (_, body) = resp.into_parts();
 
     // Wait for all the data frames to be received
-    let bytes: Vec<_> = h2.run(body.try_collect()).unwrap();
+    let bytes: Vec<_> = h2.run(body.try_collect()).await.unwrap();
 
     // One byte chunk
     assert_eq!(1, bytes.len());
@@ -132,14 +132,14 @@ async fn send_headers_recv_data_single_frame() {
     log::info!("sending request");
     let (response, _) = client.send_request(request, true).unwrap();
 
-    let resp = h2.run(response).unwrap();
+    let resp = h2.run(response).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Take the body
     let (_, body) = resp.into_parts();
 
     // Wait for all the data frames to be received
-    let bytes: Vec<_> = h2.run(body.try_collect()).unwrap();
+    let bytes: Vec<_> = h2.run(body.try_collect()).await.unwrap();
 
     // Two data frames
     assert_eq!(2, bytes.len());
@@ -538,7 +538,7 @@ async fn rst_stream_expires() {
 
         // no connection error should happen
         let mut conn = Box::pin(async move { conn.await.expect("client") });
-        conn.drive(req);
+        conn.drive(req).await;
         conn.await;
         drop(client);
     };

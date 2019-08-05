@@ -55,7 +55,10 @@ pub use std::time::Duration;
 // ===== Everything under here shouldn't be used =====
 // TODO: work on deleting this code
 
+use futures::future;
 pub use futures::future::poll_fn;
+use futures::future::Either::*;
+use std::pin::Pin;
 
 pub trait MockH2 {
     fn handshake(&mut self) -> &mut Self;
@@ -72,7 +75,10 @@ impl MockH2 for super::mock_io::Builder {
 }
 
 pub trait ClientExt {
-    fn run<F: Future + Unpin>(&mut self, f: F) -> F::Output;
+    fn run<'a, F: Future + Unpin + 'a>(
+        &'a mut self,
+        f: F,
+    ) -> Pin<Box<dyn Future<Output = F::Output> + 'a>>;
 }
 
 impl<T, B> ClientExt for client::Connection<T, B>
@@ -81,22 +87,21 @@ where
     B: IntoBuf + Unpin + 'static,
     B::Buf: Unpin,
 {
-    fn run<F: Future + Unpin>(&mut self, f: F) -> F::Output {
-        use futures::future::Either::*;
-        use futures::future::{self, FutureExt};
-
-        let res = future::select(self.fuse(), f.fuse());
-
-        // This is not right
-        let res = futures::executor::block_on(res);
-        match res {
-            Left((Ok(_), b)) => {
-                // Connection is done...
-                futures::executor::block_on(b)
+    fn run<'a, F: Future + Unpin + 'a>(
+        &'a mut self,
+        f: F,
+    ) -> Pin<Box<dyn Future<Output = F::Output> + 'a>> {
+        let res = future::select(self, f);
+        Box::pin(async {
+            match res.await {
+                Left((Ok(_), b)) => {
+                    // Connection is done...
+                    b.await
+                }
+                Right((v, _)) => return v,
+                Left((Err(e), _)) => panic!("err: {:?}", e),
             }
-            Right((v, _)) => return v,
-            Left((Err(e), _)) => panic!("err: {:?}", e),
-        }
+        })
     }
 }
 

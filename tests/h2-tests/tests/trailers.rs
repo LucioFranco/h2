@@ -33,17 +33,18 @@ async fn recv_trailers_only() {
     log::info!("sending request");
     let (response, _) = client.send_request(request, true).unwrap();
 
-    let response = h2.run(response).unwrap();
+    let response = h2.run(response).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     let (_, mut body) = response.into_parts();
 
     // Make sure there is no body
-    let chunk = h2.run(Box::pin(body.next()));
+    let chunk = h2.run(Box::pin(body.next())).await;
     assert!(chunk.is_none());
 
     let trailers = h2
         .run(poll_fn(|cx| body.poll_trailers(cx)))
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(1, trailers.len());
@@ -88,18 +89,18 @@ async fn send_trailers_immediately() {
 
     stream.send_trailers(trailers).unwrap();
 
-    let response = h2.run(response).unwrap();
+    let response = h2.run(response).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     let (_, mut body) = response.into_parts();
 
     // There is a data chunk
-    let _ = h2.run(body.next()).unwrap().unwrap();
+    let _ = h2.run(body.next()).await.unwrap().unwrap();
 
-    let chunk = h2.run(body.next());
+    let chunk = h2.run(body.next()).await;
     assert!(chunk.is_none());
 
-    let trailers = h2.run(poll_fn(|cx| body.poll_trailers(cx)));
+    let trailers = h2.run(poll_fn(|cx| body.poll_trailers(cx))).await;
     assert!(trailers.is_none());
 
     h2.await.unwrap();

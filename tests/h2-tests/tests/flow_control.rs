@@ -46,7 +46,7 @@ async fn send_data_without_requesting_capacity() {
     stream.send_data(payload[..].into(), true).unwrap();
 
     // Get the response
-    let resp = h2.run(response).unwrap();
+    let resp = h2.run(response).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
     h2.await.unwrap();
