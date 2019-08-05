@@ -1,9 +1,9 @@
 #![feature(async_await)]
 
-use h2_support::{DEFAULT_WINDOW_SIZE};
-use h2_support::prelude::*;
 use futures::future::join;
 use futures::{FutureExt, StreamExt};
+use h2_support::prelude::*;
+use h2_support::DEFAULT_WINDOW_SIZE;
 use std::task::Context;
 
 #[tokio::test]
@@ -17,8 +17,8 @@ async fn single_stream_send_large_body() {
         .write(frames::SETTINGS_ACK)
         .write(&[
             // POST /
-            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41,
-            172, 75, 143, 168, 233, 25, 151, 33, 233, 132,
+            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41, 172, 75, 143, 168, 233, 25, 151,
+            33, 233, 132,
         ])
         .write(&[
             // DATA
@@ -70,26 +70,27 @@ async fn single_stream_send_large_body() {
 async fn multiple_streams_with_payload_greater_than_default_window() {
     let _ = env_logger::try_init();
 
-    let payload = vec![0; 16384*5-1];
+    let payload = vec![0; 16384 * 5 - 1];
+    let payload_clone = payload.clone();
 
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
-        srv.recv_frame(
-            frames::headers(1).request("POST", "https://http2.akamai.com/")
-        ).await;
-        srv.recv_frame(
-            frames::headers(3).request("POST", "https://http2.akamai.com/")
-        ).await;
-        srv.recv_frame(
-            frames::headers(5).request("POST", "https://http2.akamai.com/")
-        ).await;
+        srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
+            .await;
+        srv.recv_frame(frames::headers(3).request("POST", "https://http2.akamai.com/"))
+            .await;
+        srv.recv_frame(frames::headers(5).request("POST", "https://http2.akamai.com/"))
+            .await;
         srv.recv_frame(frames::data(1, &payload[0..16_384])).await;
-        srv.recv_frame(frames::data(1, &payload[16_384..(16_384*2)])).await;
-        srv.recv_frame(frames::data(1, &payload[(16_384*2)..(16_384*3)])).await;
-        srv.recv_frame(frames::data(1, &payload[(16_384*3)..(16_384*4-1)])).await;
+        srv.recv_frame(frames::data(1, &payload[16_384..(16_384 * 2)]))
+            .await;
+        srv.recv_frame(frames::data(1, &payload[(16_384 * 2)..(16_384 * 3)]))
+            .await;
+        srv.recv_frame(frames::data(1, &payload[(16_384 * 3)..(16_384 * 4 - 1)]))
+            .await;
         srv.send_frame(frames::settings()).await;
         srv.recv_frame(frames::settings_ack()).await;
         srv.send_frame(frames::headers(1).response(200).eos()).await;
@@ -97,7 +98,7 @@ async fn multiple_streams_with_payload_greater_than_default_window() {
         srv.send_frame(frames::headers(5).response(200).eos()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request1 = Request::post("https://http2.akamai.com/").body(()).unwrap();
         let request2 = Request::post("https://http2.akamai.com/").body(()).unwrap();
@@ -108,16 +109,16 @@ async fn multiple_streams_with_payload_greater_than_default_window() {
 
         // The capacity should be immediately
         // allocated to default window size (smaller than payload)
-        stream1.reserve_capacity(payload.len());
+        stream1.reserve_capacity(payload_clone.len());
         assert_eq!(stream1.capacity(), DEFAULT_WINDOW_SIZE);
 
-        stream2.reserve_capacity(payload.len());
+        stream2.reserve_capacity(payload_clone.len());
         assert_eq!(stream2.capacity(), 0);
 
-        stream3.reserve_capacity(payload.len());
+        stream3.reserve_capacity(payload_clone.len());
         assert_eq!(stream3.capacity(), 0);
 
-        stream1.send_data(payload[..].into(), true).unwrap();
+        stream1.send_data(payload_clone[..].into(), true).unwrap();
 
         // hold onto streams so they don't close
         // stream1 doesn't close because response1 is used
@@ -139,8 +140,8 @@ async fn single_stream_send_extra_large_body_multi_frames_one_buffer() {
         .write(frames::SETTINGS_ACK)
         .write(&[
             // POST /
-            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41,
-            172, 75, 143, 168, 233, 25, 151, 33, 233, 132,
+            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41, 172, 75, 143, 168, 233, 25, 151,
+            33, 233, 132,
         ])
         .write(&[
             // DATA
@@ -196,15 +197,15 @@ async fn single_stream_send_extra_large_body_multi_frames_one_buffer() {
 async fn single_stream_send_body_greater_than_default_window() {
     let _ = env_logger::try_init();
 
-    let payload = vec![0; 16384*5-1];
+    let payload = vec![0; 16384 * 5 - 1];
 
     let mock = mock_io::Builder::new()
         .handshake()
         .write(frames::SETTINGS_ACK)
         .write(&[
             // POST /
-            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41,
-            172, 75, 143, 168, 233, 25, 151, 33, 233, 132,
+            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41, 172, 75, 143, 168, 233, 25, 151,
+            33, 233, 132,
         ])
         .write(&[
             // DATA
@@ -215,27 +216,25 @@ async fn single_stream_send_body_greater_than_default_window() {
             // DATA
             0, 64, 0, 0, 0, 0, 0, 0, 1,
         ])
-        .write(&payload[16_384..(16_384*2)])
+        .write(&payload[16_384..(16_384 * 2)])
         .write(&[
             // DATA
             0, 64, 0, 0, 0, 0, 0, 0, 1,
         ])
-        .write(&payload[(16_384*2)..(16_384*3)])
+        .write(&payload[(16_384 * 2)..(16_384 * 3)])
         .write(&[
             // DATA
             0, 63, 255, 0, 0, 0, 0, 0, 1,
         ])
-        .write(&payload[(16_384*3)..(16_384*4-1)])
-
+        .write(&payload[(16_384 * 3)..(16_384 * 4 - 1)])
         // Read window update
         .read(&[0, 0, 4, 8, 0, 0, 0, 0, 0, 0, 0, 64, 0])
         .read(&[0, 0, 4, 8, 0, 0, 0, 0, 1, 0, 0, 64, 0])
-
         .write(&[
             // DATA
             0, 64, 0, 0, 1, 0, 0, 0, 1,
         ])
-        .write(&payload[(16_384*4-1)..(16_384*5-1)])
+        .write(&payload[(16_384 * 4 - 1)..(16_384 * 5 - 1)])
         // Read response
         .read(&[0, 0, 1, 1, 5, 0, 0, 0, 1, 0x89])
         .build();
@@ -293,24 +292,20 @@ async fn single_stream_send_extra_large_body_multi_frames_multi_buffer() {
         .read(frames::SETTINGS)
         // Add wait to force the data writes to chill
         .wait(Duration::from_millis(10))
-
         // Rest
-
         .write(&[
             // POST /
-            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41,
-            172, 75, 143, 168, 233, 25, 151, 33, 233, 132,
+            0, 0, 16, 1, 4, 0, 0, 0, 1, 131, 135, 65, 139, 157, 41, 172, 75, 143, 168, 233, 25, 151,
+            33, 233, 132,
         ])
         .write(&[
             // DATA
             0, 64, 0, 0, 0, 0, 0, 0, 1,
         ])
         .write(&payload[0..16_384])
-
         .write(frames::SETTINGS_ACK)
         .read(frames::SETTINGS_ACK)
         .wait(Duration::from_millis(10))
-
         .write(&[
             // DATA
             0, 64, 0, 0, 1, 0, 0, 0, 1,
@@ -351,7 +346,7 @@ async fn send_data_receive_window_update() {
     let _ = env_logger::try_init();
     let (m, mut mock) = mock::new();
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(m).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -360,7 +355,7 @@ async fn send_data_receive_window_update() {
             .unwrap();
 
         // Send request
-        let (response, mut stream) = client.send_request(request, false).unwrap();
+        let (_response, mut stream) = client.send_request(request, false).unwrap();
 
         // Send data frame
         stream.send_data("hello".into(), false).unwrap();
@@ -368,12 +363,12 @@ async fn send_data_receive_window_update() {
         stream.reserve_capacity(frame::DEFAULT_INITIAL_WINDOW_SIZE as usize);
 
         // Wait for capacity
-        let mut stream = h2.drive(
-            util::wait_for_capacity(
+        let mut stream = h2
+            .drive(util::wait_for_capacity(
                 stream,
-                frame::DEFAULT_INITIAL_WINDOW_SIZE as usize
-            )
-        ).await;
+                frame::DEFAULT_INITIAL_WINDOW_SIZE as usize,
+            ))
+            .await;
         let payload = vec![0; frame::DEFAULT_INITIAL_WINDOW_SIZE as usize];
         stream.send_data(payload.into(), true).unwrap();
 
@@ -383,13 +378,12 @@ async fn send_data_receive_window_update() {
         h2.await.unwrap();
     };
 
-    let mock = async {
+    let mock = async move {
         let _ = mock.assert_client_handshake().await;
 
         let frame = mock.next().await.unwrap();
         let request = assert_headers!(frame.unwrap());
         assert!(!request.is_end_stream());
-        
         let frame = mock.next().await.unwrap();
         let data = assert_data!(frame.unwrap());
 
@@ -406,10 +400,12 @@ async fn send_data_receive_window_update() {
             let data = assert_data!(frame.unwrap());
             assert_eq!(data.payload().len(), frame::DEFAULT_MAX_FRAME_SIZE as usize);
         }
-        
         let frame = mock.next().await.unwrap();
         let data = assert_data!(frame.unwrap());
-        assert_eq!(data.payload().len(), (frame::DEFAULT_MAX_FRAME_SIZE-1) as usize);
+        assert_eq!(
+            data.payload().len(),
+            (frame::DEFAULT_MAX_FRAME_SIZE - 1) as usize
+        );
     };
 
     join(h2, mock).await;

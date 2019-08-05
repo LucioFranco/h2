@@ -3,13 +3,13 @@ use crate::frame::Reason;
 use crate::proto::{self, WindowSize};
 
 use bytes::{Bytes, IntoBuf};
-use http::{HeaderMap};
+use http::HeaderMap;
 
+use crate::PollExt;
+use futures::ready;
 use std::fmt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::ready;
-use crate::PollExt;
 
 /// Sends the body stream and trailers to the remote peer.
 ///
@@ -314,7 +314,8 @@ impl<B: IntoBuf> SendStream<B> {
     /// that `n` is lower than the previous call if, since then, the caller has
     /// sent data.
     pub fn poll_capacity(&mut self, cx: &mut Context) -> Poll<Option<Result<usize, crate::Error>>> {
-        self.inner.poll_capacity(cx)
+        self.inner
+            .poll_capacity(cx)
             .map_ok(|w| w as usize)
             .map_err(Into::into)
     }
@@ -422,7 +423,10 @@ impl RecvStream {
     }
 
     /// Returns received trailers.
-    pub fn poll_trailers(&mut self, cx: &mut Context) -> Poll<Option<Result<HeaderMap, crate::Error>>> {
+    pub fn poll_trailers(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Option<Result<HeaderMap, crate::Error>>> {
         self.inner.inner.poll_trailers(cx).map_err(Into::into)
     }
 
@@ -439,12 +443,8 @@ impl RecvStream {
 impl futures::Stream for RecvStream {
     type Item = Result<Bytes, crate::Error>;
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        let pinned = Pin::get_mut(self);
-        pinned.inner.inner.poll_data(cx).map_err(Into::into)
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.inner.poll_data(cx).map_err(Into::into)
     }
 }
 
@@ -522,9 +522,7 @@ impl Clone for ReleaseCapacity {
 
 impl PingPong {
     pub(crate) fn new(inner: proto::UserPings) -> Self {
-        PingPong {
-            inner,
-        }
+        PingPong { inner }
     }
 
     /// Send a `PING` frame to the peer.
@@ -548,12 +546,10 @@ impl PingPong {
         // just drop it.
         drop(ping);
 
-        self.inner
-            .send_ping()
-            .map_err(|err| match err {
-                Some(err) => err.into(),
-                None => UserError::SendPingWhilePending.into()
-            })
+        self.inner.send_ping().map_err(|err| match err {
+            Some(err) => err.into(),
+            None => UserError::SendPingWhilePending.into(),
+        })
     }
 
     /// Polls for the acknowledgement of a previously [sent][] `PING` frame.
@@ -581,16 +577,13 @@ impl PingPong {
     /// [sent]: struct.PingPong.html#method.send_ping
     pub fn poll_pong(&mut self, cx: &mut Context) -> Poll<Result<Pong, crate::Error>> {
         ready!(self.inner.poll_pong(cx))?;
-        Poll::Ready(Ok(Pong {
-            _p: (),
-        }))
+        Poll::Ready(Ok(Pong { _p: () }))
     }
 }
 
 impl fmt::Debug for PingPong {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("PingPong")
-            .finish()
+        fmt.debug_struct("PingPong").finish()
     }
 }
 
@@ -603,16 +596,13 @@ impl Ping {
     ///
     /// [`PingPong`]: struct.PingPong.html
     pub fn opaque() -> Ping {
-        Ping {
-            _p: (),
-        }
+        Ping { _p: () }
     }
 }
 
 impl fmt::Debug for Ping {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("Ping")
-            .finish()
+        fmt.debug_struct("Ping").finish()
     }
 }
 
@@ -620,7 +610,6 @@ impl fmt::Debug for Ping {
 
 impl fmt::Debug for Pong {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("Pong")
-            .finish()
+        fmt.debug_struct("Pong").finish()
     }
 }

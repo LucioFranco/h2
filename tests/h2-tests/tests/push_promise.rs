@@ -8,7 +8,7 @@ async fn recv_push_works() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -26,7 +26,7 @@ async fn recv_push_works() {
         srv.send_frame(frames::headers(2).response(200)).await;
         srv.send_frame(frames::data(2, "promised_data").eos()).await;
     };
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -35,13 +35,13 @@ async fn recv_push_works() {
             .unwrap();
         let (mut resp, _) = client.send_request(request, true).unwrap();
         let pushed = resp.push_promises();
-        let check_resp_status = async {
+        let check_resp_status = async move {
             let resp = resp.await.unwrap();
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         };
-        let check_pushed_response = async {
+        let check_pushed_response = async move {
             let p = pushed.and_then(|headers| {
-                async {
+                async move {
                     let (request, response) = headers.into_parts();
                     assert_eq!(request.into_parts().0.method, Method::GET);
                     let resp = response.await.unwrap();
@@ -68,7 +68,7 @@ async fn pushed_streams_arent_dropped_too_early() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -94,7 +94,7 @@ async fn pushed_streams_arent_dropped_too_early() {
         srv.recv_frame(frames::go_away(4)).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -103,14 +103,14 @@ async fn pushed_streams_arent_dropped_too_early() {
             .unwrap();
         let (mut resp, _) = client.send_request(request, true).unwrap();
         let pushed = resp.push_promises();
-        let check_status = async {
+        let check_status = async move {
             let resp = resp.await.unwrap();
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         };
 
-        let check_pushed = async {
+        let check_pushed = async move {
             let p = pushed.and_then(|headers| {
-                async {
+                async move {
                     let (request, response) = headers.into_parts();
                     assert_eq!(request.into_parts().0.method, Method::GET);
                     let resp = response.await.unwrap();
@@ -134,7 +134,7 @@ async fn recv_push_when_push_disabled_is_conn_error() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let mock = async {
+    let mock = async move {
         let _ = srv.assert_client_handshake().await;
         srv.recv_frame(
             frames::headers(1)
@@ -150,7 +150,7 @@ async fn recv_push_when_push_disabled_is_conn_error() {
         srv.recv_frame(frames::go_away(0).protocol_error()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::Builder::new()
             .enable_push(false)
             .handshake::<_, Bytes>(io)
@@ -162,7 +162,7 @@ async fn recv_push_when_push_disabled_is_conn_error() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let res = client.send_request(request, true).unwrap().0.await;
             let err = res.unwrap_err();
             assert_eq!(
@@ -172,7 +172,7 @@ async fn recv_push_when_push_disabled_is_conn_error() {
         };
 
         // client should see a protocol error
-        let conn = async {
+        let conn = async move {
             let res = h2.await;
             let err = res.unwrap_err();
             assert_eq!(
@@ -192,7 +192,7 @@ async fn pending_push_promises_reset_when_dropped() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -209,7 +209,7 @@ async fn pending_push_promises_reset_when_dropped() {
         srv.recv_frame(frames::reset(2).cancel()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -239,7 +239,7 @@ async fn recv_push_promise_over_max_header_list_size() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_frame_eq(settings, frames::settings().max_header_list_size(10));
         srv.recv_frame(
@@ -257,7 +257,7 @@ async fn recv_push_promise_over_max_header_list_size() {
         idle_ms(10).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::Builder::new()
             .max_header_list_size(10)
             .handshake::<_, Bytes>(io)
@@ -268,7 +268,7 @@ async fn recv_push_promise_over_max_header_list_size() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let err = client
                 .send_request(request, true)
                 .expect("send_request")
@@ -290,7 +290,7 @@ async fn recv_invalid_push_promise_headers_is_stream_protocol_error() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -322,7 +322,7 @@ async fn recv_invalid_push_promise_headers_is_stream_protocol_error() {
         srv.send_frame(frames::headers(6).response(200).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -330,7 +330,7 @@ async fn recv_invalid_push_promise_headers_is_stream_protocol_error() {
             .body(())
             .unwrap();
         let (mut resp, _) = client.send_request(request, true).unwrap();
-        let check_pushed_response = async {
+        let check_pushed_response = async move {
             let pushed = resp.push_promises();
             let p = pushed.and_then(|headers| headers.into_parts().1);
             let ps: Vec<_> = p.collect().await;
@@ -354,7 +354,7 @@ async fn recv_push_promise_skipped_stream_id() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -374,7 +374,7 @@ async fn recv_push_promise_skipped_stream_id() {
         srv.recv_frame(frames::go_away(0).protocol_error()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -382,13 +382,13 @@ async fn recv_push_promise_skipped_stream_id() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let res = client.send_request(request, true).unwrap().0.await;
             assert!(res.is_err());
         };
 
         // client should see a protocol error
-        let conn = async {
+        let conn = async move {
             let res = h2.await;
             let err = res.unwrap_err();
             assert_eq!(
@@ -408,7 +408,7 @@ async fn recv_push_promise_dup_stream_id() {
     let _ = env_logger::try_init();
 
     let (io, mut srv) = mock::new();
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -428,7 +428,7 @@ async fn recv_push_promise_dup_stream_id() {
         srv.recv_frame(frames::go_away(0).protocol_error()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -436,13 +436,13 @@ async fn recv_push_promise_dup_stream_id() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let res = client.send_request(request, true).unwrap().0.await;
             assert!(res.is_err());
         };
 
         // client should see a protocol error
-        let conn = async {
+        let conn = async move {
             let res = h2.await;
             let err = res.unwrap_err();
             assert_eq!(

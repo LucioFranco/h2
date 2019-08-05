@@ -12,7 +12,7 @@ async fn recv_single_ping() {
     let (m, mut mock) = mock::new();
 
     // Create the handshake
-    let h2 = async {
+    let h2 = async move {
         let (client, conn) = client::handshake(m).await.unwrap();
         let c = conn.await.unwrap();
         (client, c)
@@ -41,7 +41,7 @@ async fn recv_multiple_pings() {
     let _ = env_logger::try_init();
     let (io, mut client) = mock::new();
 
-    let client = async {
+    let client = async move {
         let settings = client.assert_server_handshake().await;
         assert_default_settings!(settings);
         client.send_frame(frames::ping([1; 8])).await;
@@ -50,7 +50,7 @@ async fn recv_multiple_pings() {
         client.recv_frame(frames::ping([2; 8]).pong()).await;
     };
 
-    let srv = async {
+    let srv = async move {
         let mut s = server::handshake(io).await.expect("handshake");
         s.next().await.unwrap().unwrap();
     };
@@ -101,7 +101,7 @@ async fn user_ping_pong() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::ping(frame::Ping::USER)).await;
@@ -110,7 +110,7 @@ async fn user_ping_pong() {
         srv.recv_eof().await;
     };
 
-    let client = async {
+    let client = async move {
         let (client, mut conn) = client::handshake(io).await.expect("client handshake");
         // yield once so we can ack server settings
         conn.drive(util::yield_once()).await;
@@ -145,9 +145,10 @@ async fn user_notifies_when_connection_closes() {
     let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
+        srv
     };
 
-    let client = async {
+    let client = async move {
         let (_client, mut conn) = client::handshake(io).await.expect("client handshake");
         // yield once so we can ack server settings
         conn.drive(util::yield_once()).await;

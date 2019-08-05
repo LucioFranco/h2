@@ -156,8 +156,8 @@ where
 {
     type Item = Result<Frame, RecvError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut Pin::get_mut(self).inner).poll_next(cx)
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
     }
 }
 
@@ -168,29 +168,22 @@ where
 {
     type Error = SendError;
 
-    fn start_send(self: Pin<&mut Self>, item: Frame<B>) -> Result<(), Self::Error> {
-        Pin::get_mut(self).buffer(item)?;
+    fn start_send(mut self: Pin<&mut Self>, item: Frame<B>) -> Result<(), Self::Error> {
+        Codec::buffer(&mut self, item)?;
         Ok(())
     }
     /// Returns `Ready` when the codec can buffer a frame
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::get_mut(self)
-            .framed_write()
-            .poll_ready(cx)
-            .map_err(Into::into)
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.framed_write().poll_ready(cx).map_err(Into::into)
     }
 
     /// Flush buffered data to the wire
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::get_mut(self)
-            .framed_write()
-            .flush(cx)
-            .map_err(Into::into)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.framed_write().flush(cx).map_err(Into::into)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let pinned = Pin::get_mut(self);
-        ready!(pinned.shutdown(cx))?;
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.shutdown(cx))?;
         Poll::Ready(Ok(()))
     }
 }

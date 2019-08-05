@@ -381,33 +381,32 @@ mod tokio_ {
 
     impl AsyncRead for Mock {
         fn poll_read(
-            self: Pin<&mut Self>,
+            mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
             buf: &mut [u8],
         ) -> Poll<io::Result<usize>> {
-            let me = Pin::get_mut(self);
             loop {
-                if let Some(ref mut sleep) = me.tokio.sleep {
+                if let Some(sleep) = &mut self.tokio.sleep {
                     ready!(sleep.poll_unpin(cx));
                 }
 
                 // If a sleep is set, it has already fired
-                me.tokio.sleep = None;
+                self.tokio.sleep = None;
 
-                match me.inner.read(buf) {
+                match self.inner.read(buf) {
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        if let Some(rem) = me.inner.remaining_wait() {
-                            me.tokio.sleep = Some(Delay::new(Instant::now() + rem));
+                        if let Some(rem) = self.inner.remaining_wait() {
+                            self.tokio.sleep = Some(Delay::new(Instant::now() + rem));
                         } else {
-                            me.tokio.read_wait = Some(cx.waker().clone());
+                            self.tokio.read_wait = Some(cx.waker().clone());
                             return Poll::Pending;
                         }
                     }
                     Ok(0) => {
                         // TODO: Extract
-                        match me.tokio.poll_action(cx) {
+                        match self.tokio.poll_action(cx) {
                             Poll::Ready(Some(action)) => {
-                                me.inner.actions.push_back(action);
+                                self.inner.actions.push_back(action);
                                 continue;
                             }
                             Poll::Ready(None) => {
@@ -426,37 +425,36 @@ mod tokio_ {
 
     impl AsyncWrite for Mock {
         fn poll_write(
-            self: Pin<&mut Self>,
+            mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<Result<usize, io::Error>> {
-            let me = Pin::get_mut(self);
             loop {
-                if let Some(ref mut sleep) = me.tokio.sleep {
+                if let Some(sleep) = &mut self.tokio.sleep {
                     ready!(sleep.poll_unpin(cx));
                 }
 
                 // If a sleep is set, it has already fired
-                me.tokio.sleep = None;
+                self.tokio.sleep = None;
 
-                match me.inner.write(buf) {
+                match self.inner.write(buf) {
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        if let Some(rem) = me.inner.remaining_wait() {
-                            me.tokio.sleep = Some(Delay::new(Instant::now() + rem));
+                        if let Some(rem) = self.inner.remaining_wait() {
+                            self.tokio.sleep = Some(Delay::new(Instant::now() + rem));
                         } else {
                             panic!("unexpected WouldBlock");
                         }
                     }
                     Ok(0) => {
                         // TODO: Is this correct?
-                        if !me.inner.actions.is_empty() {
+                        if !self.inner.actions.is_empty() {
                             return Poll::Pending;
                         }
 
                         // TODO: Extract
-                        match me.tokio.poll_action(cx) {
+                        match self.tokio.poll_action(cx) {
                             Poll::Ready(Some(action)) => {
-                                me.inner.actions.push_back(action);
+                                self.inner.actions.push_back(action);
                                 continue;
                             }
                             Poll::Ready(None) => {
@@ -466,7 +464,7 @@ mod tokio_ {
                         }
                     }
                     ret => {
-                        me.maybe_wakeup_reader();
+                        self.maybe_wakeup_reader();
                         return Poll::Ready(ret);
                     }
                 }

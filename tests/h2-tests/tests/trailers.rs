@@ -94,12 +94,9 @@ async fn send_trailers_immediately() {
     let (_, mut body) = response.into_parts();
 
     // There is a data chunk
-    let _ = h2
-        .run(Box::pin(async { body.next().await }))
-        .unwrap()
-        .unwrap();
+    let _ = h2.run(body.next()).unwrap().unwrap();
 
-    let chunk = h2.run(Box::pin(async { body.next().await }));
+    let chunk = h2.run(body.next());
     assert!(chunk.is_none());
 
     let trailers = h2.run(poll_fn(|cx| body.poll_trailers(cx)));

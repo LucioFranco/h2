@@ -1,12 +1,12 @@
 #![feature(async_await)]
 
+use futures::{ready, Stream};
 use h2::client;
+use h2::RecvStream;
+use http::{HeaderMap, Request};
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Poll, Context};
-use futures::{ready, Stream};
-use h2::RecvStream;
-use http::{Request, HeaderMap};
+use std::task::{Context, Poll};
 
 use std::error::Error;
 
@@ -20,24 +20,23 @@ struct Process {
 impl Future for Process {
     type Output = Result<(), h2::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
-            if pinned.trailers {
-                let trailers = ready!(pinned.body.poll_trailers(cx));
+            if self.trailers {
+                let trailers = ready!(self.body.poll_trailers(cx));
 
                 println!("GOT TRAILERS: {:?}", trailers);
 
-                return Poll::Ready(Ok(()))
+                return Poll::Ready(Ok(()));
             } else {
-                match ready!(Pin::new(&mut pinned.body).poll_next(cx)) {
+                match ready!(Pin::new(&mut self.body).poll_next(cx)) {
                     Some(Ok(chunk)) => {
                         println!("GOT CHUNK = {:?}", chunk);
-                    },
+                    }
                     Some(Err(e)) => return Poll::Ready(Err(e)),
                     None => {
-                        pinned.trailers = true;
-                    },
+                        self.trailers = true;
+                    }
                 }
             }
         }
@@ -82,7 +81,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
     Process {
         body,
         trailers: false,
-    }.await?;
-    
+    }
+    .await?;
     Ok(())
 }

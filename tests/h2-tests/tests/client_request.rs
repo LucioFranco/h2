@@ -191,7 +191,7 @@ async fn request_over_max_concurrent_streams_errors() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv
             .assert_client_handshake_with_settings(
                 frames::settings()
@@ -269,14 +269,14 @@ async fn request_over_max_concurrent_streams_errors() {
             .send_data("hello".into(), true)
             .expect("req send_data");
 
-        h2.drive(async {
+        h2.drive(async move {
             resp1.await.expect("req");
             stream2
                 .send_data("hello".into(), true)
                 .expect("req2 send_data");
         })
         .await;
-        join(async { h2.await.unwrap() }, async { resp2.await.unwrap() }).await;
+        join(async move { h2.await.unwrap() }, async move { resp2.await.unwrap() }).await;
     };
 
     join(h2, srv).await;
@@ -345,7 +345,7 @@ async fn send_request_poll_ready_when_connection_error() {
         let (resp2, _) = client.send_request(request, true).unwrap();
 
         // third stream is over max concurrent
-        let until_ready = async {
+        let until_ready = async move {
             poll_fn(move |cx| client.poll_ready(cx))
                 .await
                 .expect_err("client poll_ready");
@@ -359,13 +359,13 @@ async fn send_request_poll_ready_when_connection_error() {
         let mut unordered =
             futures::stream::FuturesUnordered::<Pin<Box<dyn Future<Output = ()>>>>::new();
         unordered.push(Box::pin(until_ready));
-        unordered.push(Box::pin(async {
+        unordered.push(Box::pin(async move {
             h2.await.expect_err("client conn");
         }));
-        unordered.push(Box::pin(async {
+        unordered.push(Box::pin(async move {
             resp1.await.expect_err("req1");
         }));
-        unordered.push(Box::pin(async {
+        unordered.push(Box::pin(async move {
             resp2.await.expect_err("req2");
         }));
 
@@ -403,10 +403,10 @@ async fn send_reset_notifies_recv_stream() {
         let (resp1, mut tx) = client.send_request(request, false).unwrap();
         let res = conn.drive(resp1).await.unwrap();
 
-        let tx = async {
+        let tx = async move {
             tx.send_reset(h2::Reason::REFUSED_STREAM);
         };
-        let rx = async {
+        let rx = async move {
             let mut body = res.into_body();
             assert!(body.next().await.is_none(), "no response body expected");
         };
@@ -562,7 +562,7 @@ async fn connection_close_notifies_response_future() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let res = client
                 .send_request(request, true)
                 .expect("send_request1")
@@ -571,7 +571,7 @@ async fn connection_close_notifies_response_future() {
             let err = res.expect_err("response");
             assert_eq!(err.to_string(), "broken pipe");
         };
-        join(async { conn.await.expect("conn") }, req).await;
+        join(async move { conn.await.expect("conn") }, req).await;
     };
 
     join(client, srv).await;
@@ -660,7 +660,7 @@ async fn sending_request_on_closed_connection() {
         });
 
         // after finish request1, there should be a conn error
-        let h2 = Box::pin(async {
+        let h2 = Box::pin(async move {
             h2.await.expect_err("h2 error");
         });
 
@@ -689,7 +689,7 @@ async fn recv_too_big_headers() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_frame_eq(settings, frames::settings().max_header_list_size(10));
         srv.recv_frame(
@@ -712,7 +712,7 @@ async fn recv_too_big_headers() {
         idle_ms(10).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::Builder::new()
             .max_header_list_size(10)
             .handshake::<_, Bytes>(io)
@@ -725,7 +725,7 @@ async fn recv_too_big_headers() {
             .unwrap();
 
         let req1 = client.send_request(request, true);
-        let req1 = async {
+        let req1 = async move {
             let err = req1.expect("send_request").0.await.expect_err("response1");
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
         };
@@ -736,7 +736,7 @@ async fn recv_too_big_headers() {
             .unwrap();
 
         let req2 = client.send_request(request, true);
-        let req2 = async {
+        let req2 = async move {
             let err = req2.expect("send_request").0.await.expect_err("response2");
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
         };
@@ -755,7 +755,7 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
     let payload = [0; (frame::DEFAULT_INITIAL_WINDOW_SIZE * 2) as usize];
     let max_frame_size = frame::DEFAULT_MAX_FRAME_SIZE as usize;
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("GET", "https://http2.akamai.com/"))
@@ -789,7 +789,7 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
         srv.recv_frame(frames::go_away(0)).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::Builder::new()
             .handshake::<_, Bytes>(io)
             .await
@@ -802,7 +802,7 @@ async fn pending_send_request_gets_reset_by_peer_properly() {
 
         let (response, mut stream) = client.send_request(request, false).expect("send_request");
 
-        let response = async {
+        let response = async move {
             let err = response.await.expect_err("response");
             assert_eq!(err.reason(), Some(Reason::REFUSED_STREAM));
         };
@@ -822,7 +822,7 @@ async fn request_without_path() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
 
@@ -835,7 +835,7 @@ async fn request_without_path() {
         srv.send_frame(frames::headers(1).response(200).eos()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.expect("handshake");
         // Note the lack of trailing slash.
         let request = Request::get("http://example.com").body(()).unwrap();
@@ -904,7 +904,7 @@ async fn notify_on_send_capacity() {
     let mut settings = frame::Settings::default();
     settings.set_max_concurrent_streams(Some(1));
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake_with_settings(settings).await;
         // This is the ACK
         assert_default_settings!(settings);
@@ -935,7 +935,7 @@ async fn notify_on_send_capacity() {
         done_rx.await.unwrap();
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::handshake(io).await.expect("handshake");
         tokio::spawn(async move {
             rx.next().await.unwrap();
@@ -978,7 +978,7 @@ async fn send_stream_poll_reset() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://example.com/"))
@@ -986,7 +986,7 @@ async fn send_stream_poll_reset() {
         srv.send_frame(frames::reset(1).refused()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::Builder::new()
             .handshake::<_, Bytes>(io)
             .await
@@ -1023,7 +1023,7 @@ async fn drop_pending_open() {
     let mut settings = frame::Settings::default();
     settings.set_max_concurrent_streams(Some(2));
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake_with_settings(settings).await;
         // This is the ACK
         assert_default_settings!(settings);
@@ -1052,13 +1052,13 @@ async fn drop_pending_open() {
             .unwrap()
     }
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::Builder::new()
             .max_concurrent_reset_streams(0)
             .handshake::<_, Bytes>(io)
             .await
             .expect("handshake");
-        let f = async {
+        let f = async move {
             init_rx.await.expect("init_rx");
             // Fill up the concurrent stream limit.
             poll_fn(|cx| client.poll_ready(cx)).await.unwrap();
@@ -1083,7 +1083,7 @@ async fn drop_pending_open() {
         };
 
         join(
-            async {
+            async move {
                 conn.await.expect("h2");
             },
             f,
@@ -1105,7 +1105,7 @@ async fn malformed_response_headers_dont_unlink_stream() {
     let (drop_tx, drop_rx) = futures::channel::oneshot::channel();
     let (queued_tx, queued_rx) = futures::channel::oneshot::channel();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
 
@@ -1137,7 +1137,7 @@ async fn malformed_response_headers_dont_unlink_stream() {
             .unwrap()
     }
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::Builder::new()
             .handshake::<_, Bytes>(io)
             .await
@@ -1159,7 +1159,7 @@ async fn malformed_response_headers_dont_unlink_stream() {
             (req2, req3); // Todo: drop these?
         };
 
-        join(async { conn.await.expect("h2") }, f).await;
+        join(async move { conn.await.expect("h2") }, f).await;
     };
 
     join(client, srv).await;

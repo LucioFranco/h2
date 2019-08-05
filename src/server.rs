@@ -69,7 +69,7 @@
 //! use h2::server;
 //! use http::{Response, StatusCode};
 //! use tokio::net::TcpListener;
-//! 
+//!
 //! #[tokio::main]
 //! pub async fn main ()  {
 //!     let addr = "127.0.0.1:5928".parse().unwrap();
@@ -119,20 +119,20 @@
 //! [`SendStream`]: ../struct.SendStream.html
 //! [`TcpListener`]: https://docs.rs/tokio-core/0.1/tokio_core/net/struct.TcpListener.html
 
-use crate::{SendStream, RecvStream, ReleaseCapacity, PingPong};
 use crate::codec::{Codec, RecvError};
 use crate::frame::{self, Pseudo, Reason, Settings, StreamId};
 use crate::proto::{self, Config, Prioritized};
+use crate::{PingPong, RecvStream, ReleaseCapacity, SendStream};
 
 use bytes::{Buf, Bytes, IntoBuf};
 use futures::ready;
 use http::{HeaderMap, Request, Response};
-use std::{convert, fmt, io, mem};
-use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
 use std::future::Future;
-use std::task::{Poll, Context};
 use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
+use std::{convert, fmt, io, mem};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 /// In progress HTTP/2.0 connection handshake future.
 ///
@@ -153,7 +153,7 @@ pub struct Handshake<T, B: IntoBuf = Bytes> {
     /// The config to pass to Connection::new after handshake succeeds.
     builder: Builder,
     /// The current state of the handshake.
-    state: Handshaking<T, B>
+    state: Handshaking<T, B>,
 }
 
 /// Accepts inbound HTTP/2.0 streams on a connection.
@@ -329,7 +329,8 @@ const PREFACE: [u8; 24] = *b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 /// # pub fn main() {}
 /// ```
 pub fn handshake<T>(io: T) -> Handshake<T, Bytes>
-where T: AsyncRead + AsyncWrite + Unpin,
+where
+    T: AsyncRead + AsyncWrite + Unpin,
 {
     Builder::new().handshake(io)
 }
@@ -404,7 +405,10 @@ where
         self.connection.poll(cx).map_err(Into::into)
     }
 
-    #[deprecated(note="use abrupt_shutdown or graceful_shutdown instead", since="0.1.4")]
+    #[deprecated(
+        note = "use abrupt_shutdown or graceful_shutdown instead",
+        since = "0.1.4"
+    )]
     #[doc(hidden)]
     pub fn close_connection(&mut self) {
         self.graceful_shutdown();
@@ -446,9 +450,7 @@ where
     ///
     /// This may only be called once. Calling multiple times will return `None`.
     pub fn ping_pong(&mut self) -> Option<PingPong> {
-        self.connection
-            .take_user_pings()
-            .map(PingPong::new)
+        self.connection.take_user_pings().map(PingPong::new)
     }
 }
 
@@ -460,20 +462,19 @@ where
 {
     type Item = Result<(Request<RecvStream>, SendResponse<B>), crate::Error>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let pinned = Pin::get_mut(self);
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Always try to advance the internal state. Getting Pending also is
         // needed to allow this function to return Pending.
-        match pinned.poll_close(cx)? {
+        match self.poll_close(cx)? {
             Poll::Ready(_) => {
                 // If the socket is closed, don't return anything
                 // TODO: drop any pending streams
                 return Poll::Ready(None);
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
-        if let Some(inner) = pinned.connection.next_incoming() {
+        if let Some(inner) = self.connection.next_incoming() {
             log::trace!("received incoming");
             let (head, _) = inner.take_request().into_parts();
             let body = RecvStream::new(ReleaseCapacity::new(inner.clone_to_opaque()));
@@ -972,9 +973,7 @@ impl<B: IntoBuf> SendResponse<B> {
 
 impl<T, B: Buf> Flush<T, B> {
     fn new(codec: Codec<T, B>) -> Self {
-        Flush {
-            codec: Some(codec),
-        }
+        Flush { codec: Some(codec) }
     }
 }
 
@@ -985,13 +984,12 @@ where
 {
     type Output = Result<Codec<T, B>, crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Flush the codec
-        ready!(pinned.codec.as_mut().unwrap().flush(cx))?;
+        ready!(self.codec.as_mut().unwrap().flush(cx))?;
 
         // Return the codec
-        Poll::Ready(Ok(pinned.codec.take().unwrap()))
+        Poll::Ready(Ok(self.codec.take().unwrap()))
     }
 }
 
@@ -1015,49 +1013,49 @@ where
 {
     type Output = Result<Codec<T, B>, crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut buf = [0; 24];
-        let mut rem = PREFACE.len() - pinned.pos;
+        let mut rem = PREFACE.len() - self.pos;
 
         while rem > 0 {
-            let n = ready!(Pin::new(pinned.inner_mut()).poll_read(cx, &mut buf[..rem]))?;
+            let n = ready!(Pin::new(self.inner_mut()).poll_read(cx, &mut buf[..rem]))?;
             if n == 0 {
                 return Poll::Ready(Err(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed unexpectedly",
-                ).into()));
+                )
+                .into()));
             }
 
-            if PREFACE[pinned.pos..pinned.pos + n] != buf[..n] {
+            if PREFACE[self.pos..self.pos + n] != buf[..n] {
                 proto_err!(conn: "read_preface: invalid preface");
                 // TODO: Should this just write the GO_AWAY frame directly?
                 return Poll::Ready(Err(Reason::PROTOCOL_ERROR.into()));
             }
 
-            pinned.pos += n;
+            self.pos += n;
             rem -= n; // TODO test
         }
 
-        Poll::Ready(Ok(pinned.codec.take().unwrap()))
+        Poll::Ready(Ok(self.codec.take().unwrap()))
     }
 }
 
 // ===== impl Handshake =====
 
 impl<T, B: IntoBuf> Future for Handshake<T, B>
-    where T: AsyncRead + AsyncWrite + Unpin,
-          B: IntoBuf + Unpin,
-          B::Buf: Unpin
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+    B: IntoBuf + Unpin,
+    B::Buf: Unpin,
 {
     type Output = Result<Connection<T, B>, crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        log::trace!("Handshake::poll(); state={:?};", pinned.state);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        log::trace!("Handshake::poll(); state={:?};", self.state);
         use crate::server::Handshaking::*;
 
-        pinned.state = if let Flushing(ref mut flush) = pinned.state {
+        self.state = if let Flushing(ref mut flush) = self.state {
             // We're currently flushing a pending SETTINGS frame. Poll the
             // flush future, and, if it's completed, advance our state to wait
             // for the client preface.
@@ -1065,7 +1063,7 @@ impl<T, B: IntoBuf> Future for Handshake<T, B>
                 Poll::Pending => {
                     log::trace!("Handshake::poll(); flush.poll()=Pending");
                     return Poll::Pending;
-                },
+                }
                 Poll::Ready(flushed) => {
                     log::trace!("Handshake::poll(); flush.poll()=Ready");
                     flushed
@@ -1077,33 +1075,36 @@ impl<T, B: IntoBuf> Future for Handshake<T, B>
             // to replace it with itself, because we have to return a value.
             // (note that the assignment to `self.state` has to be outside of
             // the `if let` block above in order to placate the borrow checker).
-            mem::replace(&mut pinned.state, Handshaking::Empty)
+            mem::replace(&mut self.state, Handshaking::Empty)
         };
-        let poll = if let ReadingPreface(ref mut read) = pinned.state {
+        let poll = if let ReadingPreface(ref mut read) = self.state {
             // We're now waiting for the client preface. Poll the `ReadPreface`
             // future. If it has completed, we will create a `Connection` handle
             // for the connection.
             Pin::new(read).poll(cx)
-            // Actually creating the `Connection` has to occur outside of this
-            // `if let` block, because we've borrowed `self` mutably in order
-            // to poll the state and won't be able to borrow the SETTINGS frame
-            // as well until we release the borrow for `poll()`.
+        // Actually creating the `Connection` has to occur outside of this
+        // `if let` block, because we've borrowed `self` mutably in order
+        // to poll the state and won't be able to borrow the SETTINGS frame
+        // as well until we release the borrow for `poll()`.
         } else {
             unreachable!("Handshake::poll() state was not advanced completely!")
         };
         poll?.map(|codec| {
-            let connection = proto::Connection::new(codec, Config {
-                next_stream_id: 2.into(),
-                // Server does not need to locally initiate any streams
-                initial_max_send_streams: 0,
-                reset_stream_duration: pinned.builder.reset_stream_duration,
-                reset_stream_max: pinned.builder.reset_stream_max,
-                settings: pinned.builder.settings.clone(),
-            });
+            let connection = proto::Connection::new(
+                codec,
+                Config {
+                    next_stream_id: 2.into(),
+                    // Server does not need to locally initiate any streams
+                    initial_max_send_streams: 0,
+                    reset_stream_duration: self.builder.reset_stream_duration,
+                    reset_stream_max: self.builder.reset_stream_max,
+                    settings: self.builder.settings.clone(),
+                },
+            );
 
             log::trace!("Handshake::poll(); connection established!");
             let mut c = Connection { connection };
-            if let Some(sz) = pinned.builder.initial_target_connection_window_size {
+            if let Some(sz) = self.builder.initial_target_connection_window_size {
                 c.set_target_window_size(sz);
             }
             Ok(c)
@@ -1112,8 +1113,9 @@ impl<T, B: IntoBuf> Future for Handshake<T, B>
 }
 
 impl<T, B> fmt::Debug for Handshake<T, B>
-    where T: AsyncRead + AsyncWrite + fmt::Debug,
-          B: fmt::Debug + IntoBuf,
+where
+    T: AsyncRead + AsyncWrite + fmt::Debug,
+    B: fmt::Debug + IntoBuf,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(fmt, "server::Handshake")
@@ -1124,16 +1126,14 @@ impl Peer {
     pub fn convert_send_message(
         id: StreamId,
         response: Response<()>,
-        end_of_stream: bool) -> frame::Headers
-    {
+        end_of_stream: bool,
+    ) -> frame::Headers {
         use http::response::Parts;
 
         // Extract the components of the HTTP request
         let (
             Parts {
-                status,
-                headers,
-                ..
+                status, headers, ..
             },
             _,
         ) = response.into_parts();
@@ -1165,7 +1165,9 @@ impl proto::Peer for Peer {
     }
 
     fn convert_poll_message(
-        pseudo: Pseudo, fields: HeaderMap, stream_id: StreamId
+        pseudo: Pseudo,
+        fields: HeaderMap,
+        stream_id: StreamId,
     ) -> Result<Self::Poll, RecvError> {
         use http::{uri, Version};
 
@@ -1198,23 +1200,29 @@ impl proto::Peer for Peer {
         // Convert the URI
         let mut parts = uri::Parts::default();
 
-
         // A request translated from HTTP/1 must not include the :authority
         // header
         if let Some(authority) = pseudo.authority {
             let maybe_authority = uri::Authority::from_shared(authority.clone().into_inner());
-            parts.authority = Some(maybe_authority.or_else(|why| malformed!(
-                "malformed headers: malformed authority ({:?}): {}", authority, why,
-            ))?);
-
+            parts.authority = Some(maybe_authority.or_else(|why| {
+                malformed!(
+                    "malformed headers: malformed authority ({:?}): {}",
+                    authority,
+                    why,
+                )
+            })?);
         }
 
         // A :scheme is always required.
         if let Some(scheme) = pseudo.scheme {
             let maybe_scheme = uri::Scheme::from_shared(scheme.clone().into_inner());
-            let scheme = maybe_scheme.or_else(|why| malformed!(
-                "malformed headers: malformed scheme ({:?}): {}", scheme, why,
-            ))?;
+            let scheme = maybe_scheme.or_else(|why| {
+                malformed!(
+                    "malformed headers: malformed scheme ({:?}): {}",
+                    scheme,
+                    why,
+                )
+            })?;
 
             // It's not possible to build an `Uri` from a scheme and path. So,
             // after validating is was a valid scheme, we just have to drop it
@@ -1233,9 +1241,9 @@ impl proto::Peer for Peer {
             }
 
             let maybe_path = uri::PathAndQuery::from_shared(path.clone().into_inner());
-            parts.path_and_query = Some(maybe_path.or_else(|why| malformed!(
-                "malformed headers: malformed path ({:?}): {}", path, why,
-            ))?);
+            parts.path_and_query = Some(maybe_path.or_else(|why| {
+                malformed!("malformed headers: malformed path ({:?}): {}", path, why,)
+            })?);
         }
 
         b.uri(parts);
@@ -1250,7 +1258,7 @@ impl proto::Peer for Peer {
                     id: stream_id,
                     reason: Reason::PROTOCOL_ERROR,
                 });
-            },
+            }
         };
 
         *request.headers_mut() = fields;
@@ -1263,18 +1271,15 @@ impl proto::Peer for Peer {
 
 impl<T, B> fmt::Debug for Handshaking<T, B>
 where
-    B: IntoBuf
+    B: IntoBuf,
 {
-    #[inline] fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match *self {
-            Handshaking::Flushing(_) =>
-                write!(f, "Handshaking::Flushing(_)"),
-            Handshaking::ReadingPreface(_) =>
-                write!(f, "Handshaking::ReadingPreface(_)"),
-            Handshaking::Empty =>
-                write!(f, "Handshaking::Empty"),
+            Handshaking::Flushing(_) => write!(f, "Handshaking::Flushing(_)"),
+            Handshaking::ReadingPreface(_) => write!(f, "Handshaking::ReadingPreface(_)"),
+            Handshaking::Empty => write!(f, "Handshaking::Empty"),
         }
-
     }
 }
 
@@ -1283,18 +1288,19 @@ where
     T: AsyncRead + AsyncWrite,
     B: IntoBuf,
 {
-    #[inline] fn from(flush: Flush<T, Prioritized<B::Buf>>) -> Self {
+    #[inline]
+    fn from(flush: Flush<T, Prioritized<B::Buf>>) -> Self {
         Handshaking::Flushing(flush)
     }
 }
 
-impl<T, B> convert::From<ReadPreface<T, Prioritized<B::Buf>>> for
-    Handshaking<T, B>
+impl<T, B> convert::From<ReadPreface<T, Prioritized<B::Buf>>> for Handshaking<T, B>
 where
     T: AsyncRead + AsyncWrite,
     B: IntoBuf,
 {
-    #[inline] fn from(read: ReadPreface<T, Prioritized<B::Buf>>) -> Self {
+    #[inline]
+    fn from(read: ReadPreface<T, Prioritized<B::Buf>>) -> Self {
         Handshaking::ReadingPreface(read)
     }
 }
@@ -1304,7 +1310,8 @@ where
     T: AsyncRead + AsyncWrite,
     B: IntoBuf,
 {
-    #[inline] fn from(codec: Codec<T, Prioritized<B::Buf>>) -> Self {
+    #[inline]
+    fn from(codec: Codec<T, Prioritized<B::Buf>>) -> Self {
         Handshaking::from(Flush::new(codec))
     }
 }

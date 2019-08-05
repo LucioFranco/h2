@@ -1,6 +1,6 @@
 #![feature(async_await)]
-use futures::{StreamExt, TryStreamExt};
 use futures::future::{join, join4};
+use futures::{StreamExt, TryStreamExt};
 use h2_support::prelude::*;
 use h2_support::util::yield_once;
 
@@ -57,10 +57,11 @@ async fn release_capacity_sends_window_update() {
     let _ = env_logger::try_init();
 
     let payload = vec![0u8; 16_384];
+    let payload_len = payload.len();
 
     let (io, mut srv) = mock::new();
 
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -78,7 +79,7 @@ async fn release_capacity_sends_window_update() {
         srv.send_frame(frames::data(1, &payload[..]).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -86,7 +87,7 @@ async fn release_capacity_sends_window_update() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let resp = client.send_request(request, true).unwrap().0.await.unwrap();
             // Get the response
             assert_eq!(resp.status(), StatusCode::OK);
@@ -94,23 +95,23 @@ async fn release_capacity_sends_window_update() {
 
             // read some body to use up window size to below half
             let buf = body.next().await.unwrap().unwrap();
-            assert_eq!(buf.len(), payload.len());
+            assert_eq!(buf.len(), payload_len);
 
             let buf = body.next().await.unwrap().unwrap();
-            assert_eq!(buf.len(), payload.len());
+            assert_eq!(buf.len(), payload_len);
 
             let buf = body.next().await.unwrap().unwrap();
-            assert_eq!(buf.len(), payload.len());
+            assert_eq!(buf.len(), payload_len);
             body.release_capacity()
                 .release_capacity(buf.len() * 2)
                 .unwrap();
 
             let buf = body.next().await.unwrap().unwrap();
-            assert_eq!(buf.len(), payload.len());
+            assert_eq!(buf.len(), payload_len);
         };
 
         join(
-            async {
+            async move {
                 h2.await.unwrap();
             },
             req,
@@ -128,7 +129,7 @@ async fn release_capacity_of_small_amount_does_not_send_window_update() {
 
     let (io, mut srv) = mock::new();
 
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -141,7 +142,7 @@ async fn release_capacity_of_small_amount_does_not_send_window_update() {
         srv.send_frame(frames::data(1, &payload[..]).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -149,7 +150,7 @@ async fn release_capacity_of_small_amount_does_not_send_window_update() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let resp = client.send_request(request, true).unwrap().0.await.unwrap();
             // Get the response
             assert_eq!(resp.status(), StatusCode::OK);
@@ -162,7 +163,7 @@ async fn release_capacity_of_small_amount_does_not_send_window_update() {
             let buf = body.next().await;
             assert!(buf.is_none());
         };
-        join(async { h2.await.unwrap() }, req).await;
+        join(async move { h2.await.unwrap() }, req).await;
     };
     join(h2, mock).await;
 }
@@ -181,7 +182,7 @@ async fn recv_data_overflows_connection_window() {
 
     let (io, mut srv) = mock::new();
 
-    let mock = async {
+    let mock = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -203,7 +204,7 @@ async fn recv_data_overflows_connection_window() {
         // connection is ended by client
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -211,7 +212,7 @@ async fn recv_data_overflows_connection_window() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let resp = client.send_request(request, true).unwrap().0.await.unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let body = resp.into_parts().1;
@@ -224,7 +225,7 @@ async fn recv_data_overflows_connection_window() {
         };
 
         // client should see a flow control error
-        let conn = async {
+        let conn = async move {
             let res = h2.await;
             let err = res.unwrap_err();
             assert_eq!(
@@ -244,7 +245,7 @@ async fn recv_data_overflows_stream_window() {
 
     let (io, mut srv) = mock::new();
 
-    let mock = async {
+    let mock = async move {
         let _ = srv.assert_client_handshake().await;
         srv.recv_frame(
             frames::headers(1)
@@ -260,7 +261,7 @@ async fn recv_data_overflows_stream_window() {
         srv.recv_frame(frames::reset(1).flow_control()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, conn) = client::Builder::new()
             .initial_window_size(16_384)
             .handshake::<_, Bytes>(io)
@@ -272,7 +273,7 @@ async fn recv_data_overflows_stream_window() {
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let resp = client.send_request(request, true).unwrap().0.await.unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let body = resp.into_parts().1;
@@ -284,7 +285,7 @@ async fn recv_data_overflows_stream_window() {
             );
         };
 
-        join(async { conn.await.unwrap() }, req).await;
+        join(async move { conn.await.unwrap() }, req).await;
     };
     join(h2, mock).await;
 }
@@ -300,7 +301,7 @@ async fn stream_error_release_connection_capacity() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -326,14 +327,14 @@ async fn stream_error_release_connection_capacity() {
             .await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .uri("https://http2.akamai.com/")
             .body(())
             .unwrap();
 
-        let req = async {
+        let req = async move {
             let resp = client
                 .send_request(request, true)
                 .unwrap()
@@ -348,13 +349,15 @@ async fn stream_error_release_connection_capacity() {
             let mut should_recv_frames = 2usize;
 
             let err = body
-                .try_for_each(move |bytes| {
-                    should_recv_bytes -= bytes.len();
-                    should_recv_frames -= 1;
-                    if should_recv_bytes == 0 {
-                        assert_eq!(should_recv_bytes, 0);
+                .try_for_each(|bytes| {
+                    async move {
+                        should_recv_bytes -= bytes.len();
+                        should_recv_frames -= 1;
+                        if should_recv_bytes == 0 {
+                            assert_eq!(should_recv_bytes, 0);
+                        }
+                        Ok(())
                     }
-                    async { Ok(()) }
                 })
                 .await
                 .expect_err("body");
@@ -363,9 +366,8 @@ async fn stream_error_release_connection_capacity() {
                 "protocol error: unspecific protocol error detected"
             );
             cap.release_capacity(to_release).expect("release_capacity");
-            Ok::<(), ()>(())
         };
-        conn.drive(req).await.unwrap();
+        conn.drive(req).await;
         conn.await.expect("client");
     };
 
@@ -379,7 +381,7 @@ async fn stream_close_by_data_frame_releases_capacity() {
 
     let window_size = frame::DEFAULT_INITIAL_WINDOW_SIZE as usize;
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -429,7 +431,7 @@ async fn stream_close_by_data_frame_releases_capacity() {
         h2.drive(resp2).await.unwrap();
     };
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -451,7 +453,7 @@ async fn stream_close_by_trailers_frame_releases_capacity() {
 
     let window_size = frame::DEFAULT_INITIAL_WINDOW_SIZE as usize;
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -501,7 +503,7 @@ async fn stream_close_by_trailers_frame_releases_capacity() {
         h2.drive(resp2).await.unwrap();
     };
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         // Get the first frame
         assert_default_settings!(settings);
@@ -522,7 +524,7 @@ async fn stream_close_by_send_reset_frame_releases_capacity() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
 
@@ -545,7 +547,7 @@ async fn stream_close_by_send_reset_frame_releases_capacity() {
         srv.send_frame(frames::headers(3).response(200).eos()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.expect("client handshake");
         let request = Request::builder()
             .uri("https://http2.akamai.com/")
@@ -575,7 +577,7 @@ async fn recv_window_update_on_stream_closed_by_data_frame() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -603,7 +605,7 @@ async fn recv_window_update_on_stream_closed_by_data_frame() {
         // Wait for the connection to close
         h2.await.unwrap();
     };
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -620,7 +622,7 @@ async fn reserved_capacity_assigned_in_multi_window_updates() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -648,7 +650,7 @@ async fn reserved_capacity_assigned_in_multi_window_updates() {
         h2.await.unwrap();
     };
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -798,7 +800,7 @@ async fn recv_settings_removes_available_capacity() {
     let mut settings = frame::Settings::default();
     settings.set_initial_window_size(Some(0));
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake_with_settings(settings).await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -810,7 +812,7 @@ async fn recv_settings_removes_available_capacity() {
         srv.send_frame(frames::headers(1).response(204).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -844,7 +846,7 @@ async fn recv_settings_keeps_assigned_capacity() {
 
     let (sent_settings, sent_settings_rx) = futures::channel::oneshot::channel();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -857,7 +859,7 @@ async fn recv_settings_keeps_assigned_capacity() {
         srv.send_frame(frames::headers(1).response(204).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -869,14 +871,14 @@ async fn recv_settings_keeps_assigned_capacity() {
 
         stream.reserve_capacity(11);
 
-        let f = async {
+        let f = async move {
             let mut stream = util::wait_for_capacity(stream, 11).await;
             sent_settings_rx.await.expect("rx");
             stream.send_data("hello world".into(), true).unwrap();
             let resp = response.await.expect("response");
             assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         };
-        join(async { h2.await.expect("h2") }, f).await;
+        join(async move { h2.await.expect("h2") }, f).await;
     };
 
     join(h2, srv).await;
@@ -890,7 +892,7 @@ async fn recv_no_init_window_then_receive_some_init_window() {
     let mut settings = frame::Settings::default();
     settings.set_initial_window_size(Some(0));
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake_with_settings(settings).await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -908,7 +910,7 @@ async fn recv_no_init_window_then_receive_some_init_window() {
         srv.send_frame(frames::headers(1).response(204).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -992,7 +994,7 @@ async fn settings_lowered_capacity_returns_capacity_to_connection() {
 
     let (th2_tx, th2_rx) = oneshot::channel();
     // Drive client connection
-    tokio::spawn(async {
+    tokio::spawn(async move {
         h2.await.unwrap();
         th2_tx.send(()).unwrap();
     });
@@ -1043,14 +1045,14 @@ async fn client_increase_target_window_size() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::window_update(0, (2 << 20) - 65_535))
             .await;
     };
 
-    let client = async {
+    let client = async move {
         let (_client, mut conn) = client::handshake(io).await.unwrap();
         conn.set_target_window_size(2 << 20);
         conn.await.unwrap();
@@ -1063,7 +1065,7 @@ async fn increase_target_window_size_after_using_some() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -1078,7 +1080,7 @@ async fn increase_target_window_size_after_using_some() {
             .await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .uri("https://http2.akamai.com/")
@@ -1104,7 +1106,7 @@ async fn decrease_target_window_size() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -1121,7 +1123,7 @@ async fn decrease_target_window_size() {
         srv.recv_frame(frames::window_update(0, 16_384)).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         conn.set_target_window_size(16_384 * 2);
 
@@ -1149,17 +1151,17 @@ async fn server_target_window_size() {
     let _ = env_logger::try_init();
     let (io, mut client) = mock::new();
 
-    let client = async {
+    let client = async move {
         let settings = client.assert_server_handshake().await;
         assert_default_settings!(settings);
         client
             .recv_frame(frames::window_update(0, (2 << 20) - 65_535))
             .await;
     };
-    let srv = async {
+    let srv = async move {
         let mut conn = server::handshake(io).await.unwrap();
         conn.set_target_window_size(2 << 20);
-        conn.next().await.unwrap().unwrap();
+        conn.next().await;
     };
 
     join(srv, client).await;
@@ -1172,7 +1174,7 @@ async fn recv_settings_increase_window_size_after_using_some() {
     let (io, mut srv) = mock::new();
 
     let new_win_size = 16_384 * 4; // 1 bigger than default
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -1189,7 +1191,7 @@ async fn recv_settings_increase_window_size_after_using_some() {
         srv.send_frame(frames::headers(1).response(200).eos()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method("POST")
@@ -1213,7 +1215,7 @@ async fn reserve_capacity_after_peer_closes() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://http2.akamai.com/"))
@@ -1221,7 +1223,7 @@ async fn reserve_capacity_after_peer_closes() {
         // close connection suddenly
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method("POST")
@@ -1229,7 +1231,7 @@ async fn reserve_capacity_after_peer_closes() {
             .body(())
             .unwrap();
         let (resp, mut req_body) = client.send_request(request, false).unwrap();
-        conn.drive(async {
+        conn.drive(async move {
             let result = resp.await;
             assert!(result.is_err());
         })
@@ -1251,7 +1253,7 @@ async fn reset_stream_waiting_for_capacity() {
 
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("GET", "http://example.com/"))
@@ -1280,7 +1282,7 @@ async fn reset_stream_waiting_for_capacity() {
             .unwrap()
     }
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::Builder::new()
             .handshake::<_, Bytes>(io)
             .await
@@ -1295,10 +1297,10 @@ async fn reset_stream_waiting_for_capacity() {
         // .. and even more.
         send3.send_data(vec![0; 1].into(), true).unwrap();
         join4(
-            async { conn.await.expect("h2") },
-            async { req1.await.expect("req1") },
-            async { req2.await.unwrap_err() },
-            async { req3.await.expect("req3") },
+            async move { conn.await.expect("h2") },
+            async move { req1.await.expect("req1") },
+            async move { req2.await.unwrap_err() },
+            async move { req3.await.expect("req3") },
         )
         .await;
     };
@@ -1316,7 +1318,7 @@ async fn data_padding() {
     body.extend_from_slice(&[b'z'; 100][..]);
     body.extend_from_slice(&[b'0'; 5][..]);
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -1333,7 +1335,7 @@ async fn data_padding() {
         .await;
         srv.send_frame(frames::data(1, body).padded().eos()).await;
     };
-    let h2 = async {
+    let h2 = async move {
         let (mut client, conn) = client::handshake(io).await.expect("handshake");
         let request = Request::builder()
             .method(Method::GET)
@@ -1343,14 +1345,14 @@ async fn data_padding() {
 
         // first request is allowed
         let (response, _) = client.send_request(request, true).unwrap();
-        let fut = async {
+        let fut = async move {
             let resp = response.await.unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let body = resp.into_body();
             let bytes = body.try_concat().await.unwrap();
             assert_eq!(bytes.len(), 100);
         };
-        join(async { conn.await.expect("client") }, fut).await;
+        join(async move { conn.await.expect("client") }, fut).await;
     };
 
     join(h2, srv).await;

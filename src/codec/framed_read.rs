@@ -330,18 +330,17 @@ where
 {
     type Item = Result<Frame, RecvError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let pinned = Pin::get_mut(self);
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             log::trace!("poll");
-            let bytes = match ready!(Pin::new(&mut pinned.inner).poll_next(cx)) {
+            let bytes = match ready!(Pin::new(&mut self.inner).poll_next(cx)) {
                 Some(Ok(bytes)) => bytes,
                 Some(Err(e)) => return Poll::Ready(Some(Err(map_err(e)))),
                 None => return Poll::Ready(None),
             };
 
             log::trace!("poll; bytes={}B", bytes.len());
-            if let Some(frame) = pinned.decode_frame(bytes)? {
+            if let Some(frame) = self.decode_frame(bytes)? {
                 log::debug!("received; frame={:?}", frame);
                 return Poll::Ready(Some(Ok(frame)));
             }

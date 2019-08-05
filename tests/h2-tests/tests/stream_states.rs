@@ -156,7 +156,7 @@ async fn closed_streams_are_released() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::handshake(io).await.unwrap();
         let request = Request::get("https://example.com/").body(()).unwrap();
 
@@ -180,7 +180,7 @@ async fn closed_streams_are_released() {
         assert_eq!(0, client.num_wired_streams());
     };
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -199,9 +199,9 @@ async fn errors_if_recv_frame_exceeds_max_frame_size() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.unwrap();
-        let req = async {
+        let req = async move {
             let resp = client.get("https://example.com/").await.expect("response");
             assert_eq!(resp.status(), StatusCode::OK);
             let body = resp.into_parts().1;
@@ -211,7 +211,7 @@ async fn errors_if_recv_frame_exceeds_max_frame_size() {
         };
 
         // client should see a conn error
-        let conn = async {
+        let conn = async move {
             let err = h2.await.unwrap_err();
             assert_eq!(err.to_string(), "protocol error: frame with invalid size");
         };
@@ -221,7 +221,7 @@ async fn errors_if_recv_frame_exceeds_max_frame_size() {
     // a bad peer
     srv.codec_mut().set_max_send_frame_size(16_384 * 4);
 
-    let srv = async {
+    let srv = async move {
         let _ = srv.assert_client_handshake().await;
         srv.recv_frame(
             frames::headers(1)
@@ -242,14 +242,14 @@ async fn configure_max_frame_size() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::Builder::new()
             .max_frame_size(16_384 * 2)
             .handshake::<_, Bytes>(io)
             .await
             .expect("handshake");
 
-        let req = async {
+        let req = async move {
             let resp = client.get("https://example.com/").await.expect("response");
             assert_eq!(resp.status(), StatusCode::OK);
             let body = resp.into_parts().1;
@@ -257,12 +257,12 @@ async fn configure_max_frame_size() {
             assert_eq!(buf.len(), 16_385);
         };
 
-        join(async { h2.await.expect("client") }, req).await;
+        join(async move { h2.await.expect("client") }, req).await;
     };
     // a good peer
     srv.codec_mut().set_max_send_frame_size(16_384 * 2);
 
-    let srv = async {
+    let srv = async move {
         let _ = srv.assert_client_handshake().await;
         srv.recv_frame(
             frames::headers(1)
@@ -281,7 +281,7 @@ async fn recv_goaway_finishes_processed_streams() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -304,10 +304,10 @@ async fn recv_goaway_finishes_processed_streams() {
         //.close();
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, h2) = client::handshake(io).await.expect("handshake");
         let mut client_clone = client.clone();
-        let req1 = async {
+        let req1 = async move {
             let resp = client_clone
                 .get("https://example.com")
                 .await
@@ -319,12 +319,12 @@ async fn recv_goaway_finishes_processed_streams() {
         };
 
         // this request will trigger a goaway
-        let req2 = async {
+        let req2 = async move {
             let err = client.get("https://example.com/").await.unwrap_err();
             assert_eq!(err.to_string(), "protocol error: not a result of an error");
         };
 
-        join3(async { h2.await.expect("client") }, req1, req2).await;
+        join3(async move { h2.await.expect("client") }, req1, req2).await;
     };
 
     join(h2, srv).await;
@@ -342,7 +342,7 @@ async fn recv_next_stream_id_updated_by_malformed_headers() {
         .into();
     bad_headers.pseudo_mut().authority = Some(bad_auth);
 
-    let client = async {
+    let client = async move {
         let settings = client.assert_server_handshake().await;
         assert_default_settings!(settings);
         // bad headers -- should error.
@@ -358,7 +358,7 @@ async fn recv_next_stream_id_updated_by_malformed_headers() {
             .await;
         client.recv_frame(frames::go_away(1).protocol_error()).await;
     };
-    let srv = async {
+    let srv = async move {
         let mut srv = server::handshake(io).await.expect("handshake");
         let res = srv.next().await.unwrap();
         let err = res.unwrap_err();
@@ -373,7 +373,7 @@ async fn skipped_stream_ids_are_implicitly_closed() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -391,14 +391,14 @@ async fn skipped_stream_ids_are_implicitly_closed() {
         srv.send_frame(frames::headers(5).response(200).eos()).await;
     };
 
-    let h2 = async {
+    let h2 = async move {
         let (mut client, mut h2) = client::Builder::new()
             .initial_stream_id(5)
             .handshake::<_, Bytes>(io)
             .await
             .expect("handshake");
 
-        let req = async {
+        let req = async move {
             let res = client.get("https://example.com/").await.expect("response");
             assert_eq!(res.status(), StatusCode::OK);
         };
@@ -414,7 +414,7 @@ async fn send_rst_stream_allows_recv_data() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -435,7 +435,7 @@ async fn send_rst_stream_allows_recv_data() {
         srv.ping_pong([1; 8]).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::handshake(io).await.expect("handshake");
         let req = async {
             let resp = client.get("https://example.com/").await.expect("response");
@@ -443,7 +443,7 @@ async fn send_rst_stream_allows_recv_data() {
             // drop resp will send a reset
         };
 
-        let mut conn = Box::pin(async {
+        let mut conn = Box::pin(async move {
             conn.await.expect("client");
         });
         conn.drive(req).await;
@@ -459,7 +459,7 @@ async fn send_rst_stream_allows_recv_trailers() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -478,7 +478,7 @@ async fn send_rst_stream_allows_recv_trailers() {
         srv.ping_pong([1; 8]).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::handshake(io).await.expect("handshake");
         let req = async {
             let resp = client.get("https://example.com/").await.expect("response");
@@ -486,7 +486,7 @@ async fn send_rst_stream_allows_recv_trailers() {
             // drop resp will send a reset
         };
 
-        let mut conn = Box::pin(async { conn.await.expect("client") });
+        let mut conn = Box::pin(async move { conn.await.expect("client") });
         conn.drive(req).await;
         conn.await;
         drop(client);
@@ -500,7 +500,7 @@ async fn rst_stream_expires() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -523,7 +523,7 @@ async fn rst_stream_expires() {
         srv.recv_frame(frames::reset(1).stream_closed()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::Builder::new()
             .reset_stream_duration(Duration::from_millis(10))
             .handshake::<_, Bytes>(io)
@@ -537,7 +537,7 @@ async fn rst_stream_expires() {
         };
 
         // no connection error should happen
-        let mut conn = Box::pin(async { conn.await.expect("client") });
+        let mut conn = Box::pin(async move { conn.await.expect("client") });
         conn.drive(req);
         conn.await;
         drop(client);
@@ -551,7 +551,7 @@ async fn rst_stream_max() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -583,14 +583,14 @@ async fn rst_stream_max() {
         srv.recv_frame(frames::reset(1).stream_closed()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, conn) = client::Builder::new()
             .max_concurrent_reset_streams(1)
             .handshake::<_, Bytes>(io)
             .await
             .expect("handshake");
         let mut client_clone = client.clone();
-        let req1 = async {
+        let req1 = async move {
             let resp = client_clone
                 .get("https://example.com/")
                 .await
@@ -606,7 +606,7 @@ async fn rst_stream_max() {
         };
 
         // no connection error should happen
-        let mut conn = Box::pin(async {
+        let mut conn = Box::pin(async move {
             conn.await.expect("client");
         });
         conn.drive(join(req1, req2)).await;
@@ -622,7 +622,7 @@ async fn reserved_state_recv_window_update() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -642,9 +642,9 @@ async fn reserved_state_recv_window_update() {
         srv.ping_pong([1; 8]).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.expect("handshake");
-        let req = async {
+        let req = async move {
             let resp = client.get("https://example.com/").await.expect("response");
             assert_eq!(resp.status(), StatusCode::OK);
         };
@@ -705,7 +705,7 @@ async fn rst_while_closing() {
     // Rendevous when we've queued a trailers frame
     let (tx, rx) = crate::futures::channel::oneshot::channel();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://example.com/"))
@@ -722,7 +722,7 @@ async fn rst_while_closing() {
         srv.recv_frame(frames::go_away(0).no_error()).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.expect("handshake");
         let request = Request::builder()
             .method(Method::POST)
@@ -731,7 +731,7 @@ async fn rst_while_closing() {
             .unwrap();
 
         // The request should be left streaming.
-        let req = async {
+        let req = async move {
             let (resp, stream) = client.send_request(request, false).expect("send_request");
             // on receipt of an EOS response from the server, transition
             // the stream Open => Half Closed (remote).
@@ -768,7 +768,7 @@ async fn rst_with_buffered_data() {
     // Synchronize the client / server on response
     let (tx, rx) = crate::futures::channel::oneshot::channel();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://example.com/"))
@@ -784,7 +784,7 @@ async fn rst_with_buffered_data() {
     // A large body
     let body = vec![0u8; 2 * frame::DEFAULT_INITIAL_WINDOW_SIZE as usize];
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.expect("handshake");
         let request = Request::builder()
             .method(Method::POST)
@@ -820,7 +820,7 @@ async fn err_with_buffered_data() {
     // Synchronize the client / server on response
     let (tx, rx) = crate::futures::channel::oneshot::channel();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://example.com/"))
@@ -838,7 +838,7 @@ async fn err_with_buffered_data() {
     // A large body
     let body = vec![0; 2 * frame::DEFAULT_INITIAL_WINDOW_SIZE as usize];
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.unwrap();
         let request = Request::builder()
             .method(Method::POST)
@@ -875,7 +875,7 @@ async fn send_err_with_buffered_data() {
     // Synchronize the client / server on response
     let (tx, rx) = crate::futures::channel::oneshot::channel();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(frames::headers(1).request("POST", "https://example.com/"))
@@ -892,7 +892,7 @@ async fn send_err_with_buffered_data() {
     // A large body
     let body = vec![0; 2 * frame::DEFAULT_INITIAL_WINDOW_SIZE as usize];
 
-    let client = async {
+    let client = async move {
         let (mut client, mut conn) = client::handshake(io).await.expect("handshake");
         let request = Request::builder()
             .method(Method::POST)
@@ -931,7 +931,7 @@ async fn srv_window_update_on_lower_stream_id() {
     let _ = env_logger::try_init();
     let (io, mut srv) = mock::new();
 
-    let srv = async {
+    let srv = async move {
         let settings = srv.assert_client_handshake().await;
         assert_default_settings!(settings);
         srv.recv_frame(
@@ -949,7 +949,7 @@ async fn srv_window_update_on_lower_stream_id() {
         srv.send_frame(frames::window_update(5, 66666)).await;
     };
 
-    let client = async {
+    let client = async move {
         let (mut client, mut h2) = client::Builder::new()
             .initial_stream_id(7)
             .handshake::<_, Bytes>(io)

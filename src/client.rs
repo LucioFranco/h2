@@ -145,7 +145,7 @@ use crate::proto;
 use crate::{PingPong, RecvStream, ReleaseCapacity, SendStream};
 
 use bytes::{Bytes, IntoBuf};
-use futures::{ready, Stream};
+use futures::{ready, FutureExt, Stream};
 use http::{uri, HeaderMap, Method, Request, Response, Version};
 use std::fmt;
 use std::future::Future;
@@ -602,16 +602,15 @@ where
 {
     type Output = Result<SendRequest<B>, crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        match pinned.inner {
-            Some(ref mut send_request) => {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match &mut self.inner {
+            Some(send_request) => {
                 let _ = ready!(send_request.poll_ready(cx))?;
             }
             None => panic!("called `poll` after future completed"),
         }
 
-        Poll::Ready(Ok(pinned.inner.take().unwrap()))
+        Poll::Ready(Ok(self.inner.take().unwrap()))
     }
 }
 
@@ -1195,10 +1194,9 @@ where
 {
     type Output = Result<(), crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        pinned.inner.maybe_close_connection_if_no_streams();
-        Pin::new(&mut pinned.inner).poll(cx).map_err(Into::into)
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.maybe_close_connection_if_no_streams();
+        self.inner.poll(cx).map_err(Into::into)
     }
 }
 
@@ -1224,40 +1222,35 @@ where
 {
     type Output = Result<(SendRequest<B>, Connection<T, B>), crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        let res = Pin::new(&mut pinned.inner)
-            .poll(cx)
-            .map_err(crate::Error::from);
-
-        let io = ready!(res)?;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let io = ready!(self.inner.poll_unpin(cx))?;
 
         log::debug!("client connection bound");
 
         // Create the codec
         let mut codec = Codec::new(io);
 
-        if let Some(max) = pinned.builder.settings.max_frame_size() {
+        if let Some(max) = self.builder.settings.max_frame_size() {
             codec.set_max_recv_frame_size(max as usize);
         }
 
-        if let Some(max) = pinned.builder.settings.max_header_list_size() {
+        if let Some(max) = self.builder.settings.max_header_list_size() {
             codec.set_max_recv_header_list_size(max as usize);
         }
 
         // Send initial settings frame
         codec
-            .buffer(pinned.builder.settings.clone().into())
+            .buffer(self.builder.settings.clone().into())
             .expect("invalid SETTINGS frame");
 
         let inner = proto::Connection::new(
             codec,
             proto::Config {
-                next_stream_id: pinned.builder.stream_id,
-                initial_max_send_streams: pinned.builder.initial_max_send_streams,
-                reset_stream_duration: pinned.builder.reset_stream_duration,
-                reset_stream_max: pinned.builder.reset_stream_max,
-                settings: pinned.builder.settings.clone(),
+                next_stream_id: self.builder.stream_id,
+                initial_max_send_streams: self.builder.initial_max_send_streams,
+                reset_stream_duration: self.builder.reset_stream_duration,
+                reset_stream_max: self.builder.reset_stream_max,
+                settings: self.builder.settings.clone(),
             },
         );
         let send_request = SendRequest {
@@ -1266,7 +1259,7 @@ where
         };
 
         let mut connection = Connection { inner };
-        if let Some(sz) = pinned.builder.initial_target_connection_window_size {
+        if let Some(sz) = self.builder.initial_target_connection_window_size {
             connection.set_target_window_size(sz);
         }
 
@@ -1291,10 +1284,9 @@ where
 impl Future for ResponseFuture {
     type Output = Result<Response<RecvStream>, crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
-        let (parts, _) = ready!(pinned.inner.poll_response(cx))?.into_parts();
-        let body = RecvStream::new(ReleaseCapacity::new(pinned.inner.clone()));
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let (parts, _) = ready!(self.inner.poll_response(cx))?.into_parts();
+        let body = RecvStream::new(ReleaseCapacity::new(self.inner.clone()));
 
         Poll::Ready(Ok(Response::from_parts(parts, body).into()))
     }
@@ -1331,9 +1323,8 @@ impl ResponseFuture {
 impl Stream for PushPromises {
     type Item = Result<PushPromise, crate::Error>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let pinned = Pin::get_mut(self);
-        match pinned.inner.poll_pushed(cx) {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.inner.poll_pushed(cx) {
             Poll::Ready(Some(Ok((request, response)))) => {
                 let response = PushedResponseFuture {
                     inner: ResponseFuture {
@@ -1375,8 +1366,8 @@ impl PushPromise {
 impl Future for PushedResponseFuture {
     type Output = Result<Response<RecvStream>, crate::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut Pin::get_mut(self).inner).poll(cx)
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.poll_unpin(cx)
     }
 }
 

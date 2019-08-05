@@ -287,42 +287,39 @@ impl Handle {
 impl Stream for Handle {
     type Item = Result<Frame, RecvError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut Pin::get_mut(self).codec).poll_next(cx)
-    }
-}
-
-impl io::Read for Handle {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        block_on(async { self.codec.get_mut().read(buf).await })
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.codec).poll_next(cx)
     }
 }
 
 impl AsyncRead for Handle {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(Pin::get_mut(self).codec.get_mut()).poll_read(cx, buf)
+        Pin::new(self.codec.get_mut()).poll_read(cx, buf)
     }
 }
 
 impl AsyncWrite for Handle {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        Pin::new(Pin::get_mut(self).codec.get_mut()).poll_write(cx, buf)
+        Pin::new(self.codec.get_mut()).poll_write(cx, buf)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(Pin::get_mut(self).codec.get_mut()).poll_flush(cx)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Pin::new(self.codec.get_mut()).poll_flush(cx)
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(Pin::get_mut(self).codec.get_mut()).poll_shutdown(cx)
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(self.codec.get_mut()).poll_shutdown(cx)
     }
 }
 
@@ -358,7 +355,7 @@ impl AsyncRead for Mock {
             "attempted read with zero length buffer... wut?"
         );
 
-        let mut me = Pin::get_mut(self).pipe.inner.lock().unwrap();
+        let mut me = self.pipe.inner.lock().unwrap();
 
         if me.rx.is_empty() {
             if me.closed {
@@ -383,7 +380,7 @@ impl AsyncWrite for Mock {
         cx: &mut Context<'_>,
         mut buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        let mut me = Pin::get_mut(self).pipe.inner.lock().unwrap();
+        let mut me = self.pipe.inner.lock().unwrap();
 
         if me.closed {
             return Poll::Ready(Ok(buf.len()));

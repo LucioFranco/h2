@@ -36,12 +36,12 @@ impl Server {
         let reqs = Arc::new(AtomicUsize::new(0));
         let reqs2 = reqs.clone();
         let join = thread::spawn(move || {
-            let server = async {
+            let server = async move {
                 let mut incoming = listener.incoming();
                 while let Some(socket) = incoming.next().await {
                     let reqs = reqs2.clone();
                     let mk_data = mk_data.clone();
-                    tokio::spawn(async {
+                    tokio::spawn(async move {
                         if let Err(e) = handle_request(socket, reqs, mk_data).await {
                             eprintln!("serve conn error: {:?}", e)
                         }
@@ -84,7 +84,7 @@ where
         reqs.fetch_add(1, Ordering::Release);
         let response = Response::builder().status(StatusCode::OK).body(()).unwrap();
         let mut send = respond.send_response(response, false)?;
-        send.send_data(mk_data(), true).ok();
+        send.send_data(mk_data(), true)?;
     }
     Ok(())
 }
@@ -97,15 +97,15 @@ struct Process {
 impl Future for Process {
     type Output = Result<(), h2::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::get_mut(self);
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
-            if pinned.trailers {
-                ready!(pinned.body.poll_trailers(cx));
+            if self.trailers {
+                ready!(self.body.poll_trailers(cx));
+                return Poll::Ready(Ok(()));
             } else {
-                match ready!(Pin::new(&mut pinned.body).poll_next(cx)) {
+                match ready!(Pin::new(&mut self.body).poll_next(cx)) {
                     None => {
-                        pinned.trailers = true;
+                        self.trailers = true;
                     }
                     _ => {}
                 }
@@ -144,7 +144,7 @@ fn hammer_client_concurrency() {
                 let (response, mut stream) = client.send_request(request, false).unwrap();
                 stream.send_trailers(HeaderMap::new()).unwrap();
 
-                tokio::spawn(async {
+                tokio::spawn(async move {
                     h2.await.unwrap();
                 });
 
