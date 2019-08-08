@@ -12,7 +12,7 @@ use std::io;
 
 use tokio::io::AsyncRead;
 use tokio::codec::FramedRead as InnerFramedRead;
-use tokio::codec::LengthDelimitedCodec;
+use tokio::codec::{LengthDelimitedCodec, LengthDelimitedCodecError};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -349,11 +349,9 @@ where
 }
 
 fn map_err(err: io::Error) -> RecvError {
-    use tokio::codec::length_delimited::FrameTooBig;
-
     if let io::ErrorKind::InvalidData = err.kind() {
         if let Some(custom) = err.get_ref() {
-            if custom.is::<FrameTooBig>() {
+            if custom.is::<LengthDelimitedCodecError>() {
                 return RecvError::Connection(Reason::FRAME_SIZE_ERROR);
             }
         }
