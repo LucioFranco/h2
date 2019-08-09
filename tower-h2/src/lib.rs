@@ -4,11 +4,14 @@
 extern crate log;
 
 mod buf;
-mod flush;
 mod error;
+mod flush;
+mod recv_body;
 
 use crate::buf::SendBuf;
 use crate::flush::Flush;
+
+pub use recv_body::RecvBody;
 
 use futures_util::{future, FutureExt, TryFutureExt};
 use h2::{client::SendRequest, RecvStream};
@@ -46,7 +49,7 @@ where
         Ok(Connection { client })
     }
 
-    pub async fn send(&mut self, request: Request<B>) -> Result<Response<RecvStream>, h2::Error> {
+    pub async fn send(&mut self, request: Request<B>) -> Result<Response<RecvBody>, h2::Error> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
         self.call(request).await
@@ -59,7 +62,7 @@ where
     B::Data: Send + Unpin + 'static,
     B::Error: Into<Box<dyn std::error::Error>>,
 {
-    type Response = Response<RecvStream>;
+    type Response = Response<RecvBody>;
     type Error = h2::Error;
     type Future = BoxFuture<Result<Self::Response, Self::Error>>;
 
@@ -87,6 +90,6 @@ where
             tokio_executor::spawn(flush.map(drop));
         }
 
-        Box::pin(response)
+        Box::pin(response.map_ok(|r| r.map(RecvBody::new)))
     }
 }

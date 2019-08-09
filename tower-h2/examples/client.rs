@@ -1,11 +1,11 @@
 #![feature(async_await)]
 
+use http::Request;
+use std::task::{Context, Poll};
 use tokio::net::TcpStream;
+use tokio_buf::BufStream;
 use tower_h2::Connection;
 use tower_service::Service;
-use http::Request;
-use tokio_buf::BufStream;
-use std::task::{Context, Poll};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,7 +40,7 @@ impl BufStream for Body {
             return None.into();
         }
 
-        use std::{mem, io};
+        use std::{io, mem};
 
         let bytes = mem::replace(&mut self.0, Default::default());
         let buf = io::Cursor::new(bytes);
