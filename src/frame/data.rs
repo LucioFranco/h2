@@ -1,5 +1,5 @@
-use bytes::{Buf, BufMut, Bytes};
 use crate::frame::{util, Error, Frame, Head, Kind, StreamId};
+use bytes::{Buf, BufMut, Bytes};
 
 use std::fmt;
 

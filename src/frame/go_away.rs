@@ -1,6 +1,6 @@
 use crate::frame::{self, Error, Head, Kind, Reason, StreamId};
 
-use bytes::{BufMut};
+use bytes::BufMut;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct GoAway {

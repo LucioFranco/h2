@@ -1,6 +1,8 @@
 use crate::codec::RecvError;
 use crate::frame::{self, Frame, Kind, Reason};
-use crate::frame::{DEFAULT_MAX_FRAME_SIZE, DEFAULT_SETTINGS_HEADER_TABLE_SIZE, MAX_MAX_FRAME_SIZE};
+use crate::frame::{
+    DEFAULT_MAX_FRAME_SIZE, DEFAULT_SETTINGS_HEADER_TABLE_SIZE, MAX_MAX_FRAME_SIZE,
+};
 
 use crate::hpack;
 
@@ -10,11 +12,11 @@ use bytes::BytesMut;
 
 use std::io;
 
-use tokio::io::AsyncRead;
-use tokio::codec::FramedRead as InnerFramedRead;
-use tokio::codec::{LengthDelimitedCodec, LengthDelimitedCodecError};
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio::codec::FramedRead as InnerFramedRead;
+use tokio::codec::{LengthDelimitedCodec, LengthDelimitedCodecError};
+use tokio::io::AsyncRead;
 
 // 16 MB "sane default" taken from golang http2
 const DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE: usize = 16 << 20;
@@ -141,24 +143,27 @@ impl<T> FramedRead<T> {
                 res.map_err(|e| {
                     proto_err!(conn: "failed to load SETTINGS frame; err={:?}", e);
                     Connection(Reason::PROTOCOL_ERROR)
-                })?.into()
-            },
+                })?
+                .into()
+            }
             Kind::Ping => {
                 let res = frame::Ping::load(head, &bytes[frame::HEADER_LEN..]);
 
                 res.map_err(|e| {
                     proto_err!(conn: "failed to load PING frame; err={:?}", e);
                     Connection(Reason::PROTOCOL_ERROR)
-                })?.into()
-            },
+                })?
+                .into()
+            }
             Kind::WindowUpdate => {
                 let res = frame::WindowUpdate::load(head, &bytes[frame::HEADER_LEN..]);
 
                 res.map_err(|e| {
                     proto_err!(conn: "failed to load WINDOW_UPDATE frame; err={:?}", e);
                     Connection(Reason::PROTOCOL_ERROR)
-                })?.into()
-            },
+                })?
+                .into()
+            }
             Kind::Data => {
                 let _ = bytes.split_to(frame::HEADER_LEN);
                 let res = frame::Data::load(head, bytes.freeze());
@@ -167,28 +172,27 @@ impl<T> FramedRead<T> {
                 res.map_err(|e| {
                     proto_err!(conn: "failed to load DATA frame; err={:?}", e);
                     Connection(Reason::PROTOCOL_ERROR)
-                })?.into()
-            },
-            Kind::Headers => {
-                header_block!(Headers, head, bytes)
-            },
+                })?
+                .into()
+            }
+            Kind::Headers => header_block!(Headers, head, bytes),
             Kind::Reset => {
                 let res = frame::Reset::load(head, &bytes[frame::HEADER_LEN..]);
                 res.map_err(|e| {
                     proto_err!(conn: "failed to load RESET frame; err={:?}", e);
                     Connection(Reason::PROTOCOL_ERROR)
-                })?.into()
-            },
+                })?
+                .into()
+            }
             Kind::GoAway => {
                 let res = frame::GoAway::load(&bytes[frame::HEADER_LEN..]);
                 res.map_err(|e| {
                     proto_err!(conn: "failed to load GO_AWAY frame; err={:?}", e);
                     Connection(Reason::PROTOCOL_ERROR)
-                })?.into()
-            },
-            Kind::PushPromise => {
-                header_block!(PushPromise, head, bytes)
-            },
+                })?
+                .into()
+            }
+            Kind::PushPromise => header_block!(PushPromise, head, bytes),
             Kind::Priority => {
                 if head.stream_id() == 0 {
                     // Invalid stream identifier
@@ -208,13 +212,13 @@ impl<T> FramedRead<T> {
                             id,
                             reason: Reason::PROTOCOL_ERROR,
                         });
-                    },
+                    }
                     Err(e) => {
                         proto_err!(conn: "failed to load PRIORITY frame; err={:?};", e);
                         return Err(Connection(Reason::PROTOCOL_ERROR));
                     }
                 }
-            },
+            }
             Kind::Continuation => {
                 let is_end_headers = (head.flag() & 0x4) == 0x4;
 
@@ -231,8 +235,6 @@ impl<T> FramedRead<T> {
                     proto_err!(conn: "CONTINUATION frame stream ID does not match previous frame stream ID");
                     return Err(Connection(Reason::PROTOCOL_ERROR));
                 }
-
-
 
                 // Extend the buf
                 if partial.buf.is_empty() {
@@ -260,9 +262,14 @@ impl<T> FramedRead<T> {
                     partial.buf.extend_from_slice(&bytes[frame::HEADER_LEN..]);
                 }
 
-                match partial.frame.load_hpack(&mut partial.buf, self.max_header_list_size, &mut self.hpack) {
-                    Ok(_) => {},
-                    Err(frame::Error::Hpack(hpack::DecoderError::NeedMore(_))) if !is_end_headers => {},
+                match partial.frame.load_hpack(
+                    &mut partial.buf,
+                    self.max_header_list_size,
+                    &mut self.hpack,
+                ) {
+                    Ok(_) => {}
+                    Err(frame::Error::Hpack(hpack::DecoderError::NeedMore(_)))
+                        if !is_end_headers => {}
                     Err(frame::Error::MalformedMessage) => {
                         let id = head.stream_id();
                         proto_err!(stream: "malformed CONTINUATION frame; stream={:?}", id);
@@ -270,11 +277,11 @@ impl<T> FramedRead<T> {
                             id,
                             reason: Reason::PROTOCOL_ERROR,
                         });
-                    },
+                    }
                     Err(e) => {
                         proto_err!(conn: "failed HPACK decoding; err={:?}", e);
                         return Err(Connection(Reason::PROTOCOL_ERROR));
-                    },
+                    }
                 }
 
                 if is_end_headers {
@@ -283,11 +290,11 @@ impl<T> FramedRead<T> {
                     self.partial = Some(partial);
                     return Ok(None);
                 }
-            },
+            }
             Kind::Unknown => {
                 // Unknown frames are ignored
                 return Ok(None);
-            },
+            }
         };
 
         Ok(Some(frame))

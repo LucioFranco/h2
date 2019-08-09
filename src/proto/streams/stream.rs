@@ -1,8 +1,8 @@
 use super::*;
 
+use std::task::{Context, Waker};
 use std::time::Instant;
 use std::usize;
-use std::task::{Context, Waker};
 
 /// Tracks Stream related state
 ///
@@ -133,11 +133,7 @@ pub(super) struct NextOpen;
 pub(super) struct NextResetExpire;
 
 impl Stream {
-    pub fn new(
-        id: StreamId,
-        init_send_window: WindowSize,
-        init_recv_window: WindowSize,
-    ) -> Stream {
+    pub fn new(id: StreamId, init_send_window: WindowSize, init_recv_window: WindowSize) -> Stream {
         let mut send_flow = FlowControl::new();
         let mut recv_flow = FlowControl::new();
 
@@ -247,8 +243,12 @@ impl Stream {
         self.send_capacity_inc = true;
         self.send_flow.assign_capacity(capacity);
 
-        log::trace!("  assigned capacity to stream; available={}; buffered={}; id={:?}",
-               self.send_flow.available(), self.buffered_send_data, self.id);
+        log::trace!(
+            "  assigned capacity to stream; available={}; buffered={}; id={:?}",
+            self.send_flow.available(),
+            self.buffered_send_data,
+            self.id
+        );
 
         // Only notify if the capacity exceeds the amount of buffered data
         if self.send_flow.available() > self.buffered_send_data {
@@ -265,7 +265,7 @@ impl Stream {
                 None => return Err(()),
             },
             ContentLength::Head => return Err(()),
-            _ => {},
+            _ => {}
         }
 
         Ok(())

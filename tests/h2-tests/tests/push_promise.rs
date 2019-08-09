@@ -1,6 +1,6 @@
 #![feature(async_await)]
-use futures::{ StreamExt, TryStreamExt};
 use futures::future::join;
+use futures::{StreamExt, TryStreamExt};
 use h2_support::prelude::*;
 
 #[tokio::test]

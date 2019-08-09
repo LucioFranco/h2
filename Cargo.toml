@@ -33,6 +33,7 @@ unstable = []
 
 [workspace]
 members = [
+    "tower-h2",
     "tests/h2-fuzz",
     "tests/h2-tests",
     "tests/h2-support",
@@ -42,7 +43,7 @@ members = [
 
 [dependencies]
 futures-preview = "0.3.0-alpha.17"
-tokio = { git = "https://github.com/tokio-rs/tokio" }
+tokio = "=0.2.0-alpha.1"
 bytes = "0.4.7"
 http = "0.1.8"
 byteorder = "1.0"

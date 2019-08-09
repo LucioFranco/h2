@@ -1,5 +1,5 @@
-use super::*;
 use super::store::Resolve;
+use super::*;
 
 use crate::frame::{Reason, StreamId};
 
@@ -8,9 +8,9 @@ use crate::codec::UserError::*;
 
 use bytes::buf::Take;
 use futures::ready;
-use std::{cmp, fmt, mem};
 use std::io;
 use std::task::{Context, Poll, Waker};
+use std::{cmp, fmt, mem};
 
 /// # Warning
 ///
@@ -203,9 +203,7 @@ impl Prioritize {
             // The stream has no capacity to send the frame now, save it but
             // don't notify the connection task. Once additional capacity
             // becomes available, the frame will be flushed.
-            stream
-                .pending_send
-                .push_back(buffer, frame.into());
+            stream.pending_send.push_back(buffer, frame.into());
         }
 
         Ok(())
@@ -216,7 +214,8 @@ impl Prioritize {
         &mut self,
         capacity: WindowSize,
         stream: &mut store::Ptr,
-        counts: &mut Counts) {
+        counts: &mut Counts,
+    ) {
         log::trace!(
             "reserve_capacity; stream={:?}; requested={:?}; effective={:?}; curr={:?}",
             stream.id,
@@ -338,8 +337,8 @@ impl Prioritize {
         &mut self,
         inc: WindowSize,
         store: &mut R,
-        counts: &mut Counts)
-    where
+        counts: &mut Counts,
+    ) where
         R: Resolve,
     {
         log::trace!("assign_connection_capacity; inc={}", inc);
@@ -419,11 +418,7 @@ impl Prioritize {
             // TODO: Should prioritization factor into this?
             let assign = cmp::min(conn_available, additional);
 
-            log::trace!(
-                "  assigning; stream={:?}, capacity={}",
-                stream.id,
-                assign,
-            );
+            log::trace!("  assigning; stream={:?}, capacity={}", stream.id, assign,);
 
             // Assign the capacity to the stream
             stream.assign_capacity(assign);
@@ -522,19 +517,19 @@ impl Prioritize {
 
                     // Because, always try to reclaim...
                     self.reclaim_frame(buffer, store, dst);
-                },
+                }
                 None => {
                     // Try to flush the codec.
                     ready!(dst.flush(cx))?;
 
                     // This might release a data frame...
                     if !self.reclaim_frame(buffer, store, dst) {
-                        return Poll::Ready(Ok(()))
+                        return Poll::Ready(Ok(()));
                     }
 
                     // No need to poll ready as poll_complete() does this for
                     // us...
-                },
+                }
             }
         }
     }
@@ -603,11 +598,12 @@ impl Prioritize {
 
     /// Push the frame to the front of the stream's deque, scheduling the
     /// stream if needed.
-    fn push_back_frame<B>(&mut self,
-                          frame: Frame<B>,
-                          buffer: &mut Buffer<Frame<B>>,
-                          stream: &mut store::Ptr)
-    {
+    fn push_back_frame<B>(
+        &mut self,
+        frame: Frame<B>,
+        buffer: &mut Buffer<Frame<B>>,
+        stream: &mut store::Ptr,
+    ) {
         // Push the frame to the front of the stream's deque
         stream.pending_send.push_front(buffer, frame);
 
@@ -665,8 +661,11 @@ impl Prioritize {
         loop {
             match self.pending_send.pop(store) {
                 Some(mut stream) => {
-                    log::trace!("pop_frame; stream={:?}; stream.state={:?}",
-                        stream.id, stream.state);
+                    log::trace!(
+                        "pop_frame; stream={:?}; stream.state={:?}",
+                        stream.id,
+                        stream.state
+                    );
 
                     // It's possible that this stream, besides having data to send,
                     // is also queued to send a reset, and thus is already in the queue
@@ -675,8 +674,11 @@ impl Prioritize {
                     // To be safe, we just always ask the stream.
                     let is_pending_reset = stream.is_pending_reset_expiration();
 
-                    log::trace!(" --> stream={:?}; is_pending_reset={:?};",
-                        stream.id, is_pending_reset);
+                    log::trace!(
+                        " --> stream={:?}; is_pending_reset={:?};",
+                        stream.id,
+                        is_pending_reset
+                    );
 
                     let frame = match stream.pending_send.pop_front(buffer) {
                         Some(Frame::Data(mut frame)) => {
@@ -715,9 +717,7 @@ impl Prioritize {
                                 // happen if the remote reduced the stream
                                 // window. In this case, we need to buffer the
                                 // frame and wait for a window update...
-                                stream
-                                    .pending_send
-                                    .push_front(buffer, frame.into());
+                                stream.pending_send.push_front(buffer, frame.into());
 
                                 continue;
                             }
@@ -726,7 +726,8 @@ impl Prioritize {
                             let len = cmp::min(sz, max_len);
 
                             // Only send up to the stream's window capacity
-                            let len = cmp::min(len, stream_capacity.as_size() as usize) as WindowSize;
+                            let len =
+                                cmp::min(len, stream_capacity.as_size() as usize) as WindowSize;
 
                             // There *must* be be enough connection level
                             // capacity at this point.
@@ -761,20 +762,18 @@ impl Prioritize {
                                 frame.set_end_stream(false);
                             }
 
-                            Frame::Data(frame.map(|buf| {
-                                Prioritized {
-                                    inner: buf.take(len),
-                                    end_of_stream: eos,
-                                    stream: stream.key(),
-                                }
+                            Frame::Data(frame.map(|buf| Prioritized {
+                                inner: buf.take(len),
+                                end_of_stream: eos,
+                                stream: stream.key(),
                             }))
-                        },
-                        Some(frame) => frame.map(|_|
+                        }
+                        Some(frame) => frame.map(|_| {
                             unreachable!(
                                 "Frame::map closure will only be called \
                                  on DATA frames."
-                             )
-                        ),
+                            )
+                        }),
                         None => {
                             if let Some(reason) = stream.state.get_scheduled_reset() {
                                 stream.state.set_reset(reason);
@@ -814,7 +813,7 @@ impl Prioritize {
                     counts.transition_after(stream, is_pending_reset);
 
                     return Some(frame);
-                },
+                }
                 None => return None,
             }
         }

@@ -1,7 +1,7 @@
 use std::fmt;
 
-use bytes::{BufMut, BytesMut};
 use crate::frame::{util, Error, Frame, FrameSize, Head, Kind, StreamId};
+use bytes::{BufMut, BytesMut};
 
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Settings {
@@ -142,34 +142,36 @@ impl Settings {
             match Setting::load(raw) {
                 Some(HeaderTableSize(val)) => {
                     settings.header_table_size = Some(val);
-                },
+                }
                 Some(EnablePush(val)) => match val {
                     0 | 1 => {
                         settings.enable_push = Some(val);
-                    },
+                    }
                     _ => {
                         return Err(Error::InvalidSettingValue);
-                    },
+                    }
                 },
                 Some(MaxConcurrentStreams(val)) => {
                     settings.max_concurrent_streams = Some(val);
-                },
-                Some(InitialWindowSize(val)) => if val as usize > MAX_INITIAL_WINDOW_SIZE {
-                    return Err(Error::InvalidSettingValue);
-                } else {
-                    settings.initial_window_size = Some(val);
-                },
+                }
+                Some(InitialWindowSize(val)) => {
+                    if val as usize > MAX_INITIAL_WINDOW_SIZE {
+                        return Err(Error::InvalidSettingValue);
+                    } else {
+                        settings.initial_window_size = Some(val);
+                    }
+                }
                 Some(MaxFrameSize(val)) => {
                     if val < DEFAULT_MAX_FRAME_SIZE || val > MAX_MAX_FRAME_SIZE {
                         return Err(Error::InvalidSettingValue);
                     } else {
                         settings.max_frame_size = Some(val);
                     }
-                },
+                }
                 Some(MaxHeaderListSize(val)) => {
                     settings.max_header_list_size = Some(val);
-                },
-                None => {},
+                }
+                None => {}
             }
         }
 

@@ -2,8 +2,8 @@ use crate::codec::Codec;
 use crate::frame::{self, Reason, StreamId};
 
 use bytes::Buf;
-use std::task::{Poll, Context};
 use std::io;
+use std::task::{Context, Poll};
 use tokio::io::AsyncWrite;
 
 /// Manages our sending of GOAWAY frames.
@@ -59,7 +59,7 @@ impl GoAway {
             assert!(
                 f.last_stream_id() <= going_away.last_processed_id,
                 "GOAWAY stream IDs shouldn't be higher; \
-                last_processed_id = {:?}, f.last_stream_id() = {:?}",
+                 last_processed_id = {:?}, f.last_stream_id() = {:?}",
                 going_away.last_processed_id,
                 f.last_stream_id(),
             );
@@ -76,8 +76,8 @@ impl GoAway {
         self.close_now = true;
         if let Some(ref going_away) = self.going_away {
             // Prevent sending the same GOAWAY twice.
-            if going_away.last_processed_id == f.last_stream_id()
-                && going_away.reason == f.reason() {
+            if going_away.last_processed_id == f.last_stream_id() && going_away.reason == f.reason()
+            {
                 return;
             }
         }
@@ -100,9 +100,7 @@ impl GoAway {
 
     /// Return the last Reason we've sent.
     pub fn going_away_reason(&self) -> Option<Reason> {
-        self.going_away
-            .as_ref()
-            .map(|g| g.reason)
+        self.going_away.as_ref().map(|g| g.reason)
     }
 
     /// Returns if the connection should close now, or wait until idle.
@@ -112,16 +110,22 @@ impl GoAway {
 
     /// Returns if the connection should be closed when idle.
     pub fn should_close_on_idle(&self) -> bool {
-        !self.close_now && self.going_away
-            .as_ref()
-            .map(|g| g.last_processed_id != StreamId::MAX)
-            .unwrap_or(false)
+        !self.close_now
+            && self
+                .going_away
+                .as_ref()
+                .map(|g| g.last_processed_id != StreamId::MAX)
+                .unwrap_or(false)
     }
 
     /// Try to write a pending GOAWAY frame to the buffer.
     ///
     /// If a frame is written, the `Reason` of the GOAWAY is returned.
-    pub fn send_pending_go_away<T, B>(&mut self, cx: &mut Context, dst: &mut Codec<T, B>) -> Poll<Option<io::Result<Reason>>>
+    pub fn send_pending_go_away<T, B>(
+        &mut self,
+        cx: &mut Context,
+        dst: &mut Codec<T, B>,
+    ) -> Poll<Option<io::Result<Reason>>>
     where
         T: AsyncWrite + Unpin,
         B: Buf + Unpin,
@@ -133,9 +137,7 @@ impl GoAway {
             }
 
             let reason = frame.reason();
-            dst.buffer(frame.into())
-                .ok()
-                .expect("invalid GOAWAY frame");
+            dst.buffer(frame.into()).ok().expect("invalid GOAWAY frame");
 
             return Poll::Ready(Some(Ok(reason)));
         } else if self.should_close_now() {

@@ -77,7 +77,7 @@
 //! #[tokio::main]
 //! pub async fn main() -> Result<(), Box<dyn Error>> {
 //!     let addr = "127.0.0.1:5928".parse().unwrap();
-//!     
+//!
 //!     // Establish TCP connection to the server.
 //!     let tcp = TcpStream::connect(&addr).await?;
 //!     let (h2, connection) = client::handshake(tcp).await?;
@@ -96,7 +96,7 @@
 //!     // Send the request. The second tuple item allows the caller
 //!     // to stream a request body.
 //!     let (response, _) = h2.send_request(request, true).unwrap();
-//!     
+//!
 //!     let (head, mut body) = response.await?.into_parts();
 //!
 //!     println!("Received response: {:?}", head);
@@ -174,7 +174,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 #[must_use = "futures do nothing unless polled"]
 pub struct Handshake<'a, T, B = Bytes> {
     builder: Builder,
-    inner: Pin<Box<dyn Future<Output = io::Result<T>> + 'a>>,
+    inner: Pin<Box<dyn Future<Output = io::Result<T>> + Send + 'a>>,
     _marker: PhantomData<fn(B)>,
 }
 
@@ -1077,7 +1077,7 @@ impl Builder {
     /// ```
     pub fn handshake<'a, T, B>(&self, io: T) -> Handshake<'a, T, B>
     where
-        T: AsyncRead + AsyncWrite + Unpin + 'a,
+        T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
         B: IntoBuf + Unpin,
         B::Buf: Unpin + 'static,
     {
@@ -1128,7 +1128,7 @@ impl Default for Builder {
 /// ```
 pub fn handshake<'a, T>(io: T) -> Handshake<'a, T, Bytes>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
 {
     Builder::new().handshake(io)
 }
@@ -1137,7 +1137,7 @@ where
 
 impl<'a, T, B> Connection<T, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
     B: IntoBuf + Unpin,
     B::Buf: Unpin,
 {
@@ -1216,7 +1216,7 @@ where
 
 impl<'a, T, B> Future for Handshake<'_, T, B>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
     B: IntoBuf + Unpin,
     B::Buf: Unpin + 'static,
 {

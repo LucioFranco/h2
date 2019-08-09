@@ -1,13 +1,13 @@
+use super::{
+    store, Buffer, Codec, Config, Counts, Frame, Prioritize, Prioritized, Store, Stream, StreamId,
+    StreamIdOverflow, WindowSize,
+};
 use crate::codec::{RecvError, UserError};
 use crate::frame::{self, Reason};
-use super::{
-    store, Buffer, Codec, Config, Counts, Frame, Prioritize,
-    Prioritized, Store, Stream, StreamId, StreamIdOverflow, WindowSize,
-};
 
 use bytes::Buf;
 use http;
-use std::task::{Context, Waker, Poll};
+use std::task::{Context, Poll, Waker};
 use tokio::io::AsyncWrite;
 
 use std::io;
@@ -80,7 +80,6 @@ impl Send {
             if te != "trailers" {
                 log::debug!("illegal connection-specific headers found");
                 return Err(UserError::MalformedHeaders);
-
             }
         }
 
@@ -102,7 +101,8 @@ impl Send {
         }
 
         // Queue the frame for sending
-        self.prioritize.queue_frame(frame.into(), buffer, stream, task);
+        self.prioritize
+            .queue_frame(frame.into(), buffer, stream, task);
 
         Ok(())
     }
@@ -124,7 +124,7 @@ impl Send {
             "send_reset(..., reason={:?}, stream={:?}, ..., \
              is_reset={:?}; is_closed={:?}; pending_send.is_empty={:?}; \
              state={:?} \
-            ",
+             ",
             reason,
             stream.id,
             is_reset,
@@ -150,7 +150,7 @@ impl Send {
         if is_closed && is_empty {
             log::trace!(
                 " -> not sending explicit RST_STREAM ({:?} was closed \
-                     and send queue was flushed)",
+                 and send queue was flushed)",
                 stream.id
             );
             return;
@@ -165,7 +165,8 @@ impl Send {
         let frame = frame::Reset::new(stream.id, reason);
 
         log::trace!("send_reset -- queueing; frame={:?}", frame);
-        self.prioritize.queue_frame(frame.into(), buffer, stream, task);
+        self.prioritize
+            .queue_frame(frame.into(), buffer, stream, task);
         self.prioritize.reclaim_all_capacity(stream, counts);
     }
 
@@ -195,9 +196,11 @@ impl Send {
         counts: &mut Counts,
         task: &mut Option<Waker>,
     ) -> Result<(), UserError>
-        where B: Buf,
+    where
+        B: Buf,
     {
-        self.prioritize.send_data(frame, buffer, stream, counts, task)
+        self.prioritize
+            .send_data(frame, buffer, stream, counts, task)
     }
 
     pub fn send_trailers<B>(
@@ -220,7 +223,8 @@ impl Send {
         stream.state.send_close();
 
         log::trace!("send_trailers -- queuing; frame={:?}", frame);
-        self.prioritize.queue_frame(frame.into(), buffer, stream, task);
+        self.prioritize
+            .queue_frame(frame.into(), buffer, stream, task);
 
         // Release any excess capacity
         self.prioritize.reserve_capacity(0, stream, counts);
@@ -236,10 +240,12 @@ impl Send {
         counts: &mut Counts,
         dst: &mut Codec<T, Prioritized<B>>,
     ) -> Poll<io::Result<()>>
-    where T: AsyncWrite + Unpin,
-          B: Buf + Unpin,
+    where
+        T: AsyncWrite + Unpin,
+        B: Buf + Unpin,
     {
-        self.prioritize.poll_complete(cx, buffer, store, counts, dst)
+        self.prioritize
+            .poll_complete(cx, buffer, store, counts, dst)
     }
 
     /// Request capacity to send data
@@ -247,8 +253,8 @@ impl Send {
         &mut self,
         capacity: WindowSize,
         stream: &mut store::Ptr,
-        counts: &mut Counts)
-    {
+        counts: &mut Counts,
+    ) {
         self.prioritize.reserve_capacity(capacity, stream, counts)
     }
 
@@ -294,7 +300,7 @@ impl Send {
             None => {
                 stream.wait_send(cx);
                 Poll::Pending
-            },
+            }
         }
     }
 
@@ -321,7 +327,11 @@ impl Send {
 
             self.send_reset(
                 Reason::FLOW_CONTROL_ERROR.into(),
-                buffer, stream, counts, task);
+                buffer,
+                stream,
+                counts,
+                task,
+            );
 
             return Err(e);
         }
@@ -446,16 +456,14 @@ impl Send {
     }
 
     pub fn ensure_next_stream_id(&self) -> Result<StreamId, UserError> {
-        self.next_stream_id.map_err(|_| UserError::OverflowedStreamId)
+        self.next_stream_id
+            .map_err(|_| UserError::OverflowedStreamId)
     }
 
     pub fn may_have_created_stream(&self, id: StreamId) -> bool {
         if let Ok(next_id) = self.next_stream_id {
             // Peer::is_local_init should have been called beforehand
-            debug_assert_eq!(
-                id.is_server_initiated(),
-                next_id.is_server_initiated(),
-            );
+            debug_assert_eq!(id.is_server_initiated(), next_id.is_server_initiated(),);
             id < next_id
         } else {
             true

@@ -1,18 +1,18 @@
-use crate::{client, frame, proto, server};
 use crate::codec::RecvError;
 use crate::frame::{Reason, StreamId};
+use crate::{client, frame, proto, server};
 
 use crate::frame::DEFAULT_INITIAL_WINDOW_SIZE;
 use crate::proto::*;
 
 use bytes::{Bytes, IntoBuf};
-use futures::{Stream, ready};
-use tokio::io::{AsyncRead, AsyncWrite};
-use std::task::{Context, Poll};
-use std::pin::Pin;
-use std::marker::PhantomData;
+use futures::{ready, Stream};
 use std::io;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 /// An H2 connection
 #[derive(Debug)]
@@ -76,12 +76,10 @@ where
     B: IntoBuf + Unpin,
     B::Buf: Unpin,
 {
-    pub fn new(
-        codec: Codec<T, Prioritized<B::Buf>>,
-        config: Config,
-    ) -> Connection<T, P, B> {
+    pub fn new(codec: Codec<T, Prioritized<B::Buf>>, config: Config) -> Connection<T, P, B> {
         let streams = Streams::new(streams::Config {
-            local_init_window_sz: config.settings
+            local_init_window_sz: config
+                .settings
                 .initial_window_size()
                 .unwrap_or(DEFAULT_INITIAL_WINDOW_SIZE),
             initial_max_send_streams: config.initial_max_send_streams,
@@ -90,7 +88,8 @@ where
             local_reset_duration: config.reset_stream_duration,
             local_reset_max: config.reset_stream_max,
             remote_init_window_sz: DEFAULT_INITIAL_WINDOW_SIZE,
-            remote_max_initiated: config.settings
+            remote_max_initiated: config
+                .settings
                 .max_concurrent_streams()
                 .map(|max| max as usize),
         });
@@ -118,10 +117,9 @@ where
         // The order of these calls don't really matter too much
         ready!(self.ping_pong.send_pending_pong(cx, &mut self.codec))?;
         ready!(self.ping_pong.send_pending_ping(cx, &mut self.codec))?;
-        ready!(
-            self.settings
-                .send_pending_ack(cx, &mut self.codec, &mut self.streams)
-        )?;
+        ready!(self
+            .settings
+            .send_pending_ack(cx, &mut self.codec, &mut self.streams))?;
         ready!(self.streams.send_pending_refusal(cx, &mut self.codec))?;
 
         Poll::Ready(Ok(()))
@@ -220,7 +218,7 @@ where
                             }
 
                             return Poll::Pending;
-                        },
+                        }
                         // Attempting to read a frame resulted in a connection level
                         // error. This is handled by setting a GOAWAY frame followed by
                         // terminating the connection.
@@ -240,17 +238,14 @@ where
                             // Reset all active streams
                             self.streams.recv_err(&e.into());
                             self.go_away_now(e);
-                        },
+                        }
                         // Attempting to read a frame resulted in a stream level error.
                         // This is handled by resetting the frame then trying to read
                         // another frame.
-                        Poll::Ready(Err(Stream {
-                            id,
-                            reason,
-                        })) => {
+                        Poll::Ready(Err(Stream { id, reason })) => {
                             log::trace!("stream error; id={:?}; reason={:?}", id, reason);
                             self.streams.send_reset(id, reason);
-                        },
+                        }
                         // Attempting to read a frame resulted in an I/O error. All
                         // active streams must be reset.
                         //
@@ -264,7 +259,7 @@ where
 
                             // Return the error
                             return Poll::Ready(Err(e));
-                        },
+                        }
                     }
                 }
                 State::Closing(reason) => {
@@ -274,7 +269,7 @@ where
 
                     // Transition the state to error
                     self.state = State::Closed(reason);
-                },
+                }
                 State::Closed(reason) => return self.take_error(reason),
             }
         }
@@ -295,7 +290,7 @@ where
             // - poll_go_away may buffer a graceful shutdown GOAWAY frame
             // - If it has, we've also added a PING to be sent in poll_ready
             match ready!(self.poll_go_away(cx)) {
-                Some(Ok(reason)) =>  {
+                Some(Ok(reason)) => {
                     if self.go_away.should_close_now() {
                         if self.go_away.is_user_initiated() {
                             // A user initiated abrupt shutdown shouldn't return
@@ -306,8 +301,12 @@ where
                         }
                     }
                     // Only NO_ERROR should be waiting for idle
-                    debug_assert_eq!(reason, Reason::NO_ERROR, "graceful GOAWAY should be NO_ERROR");
-                },
+                    debug_assert_eq!(
+                        reason,
+                        Reason::NO_ERROR,
+                        "graceful GOAWAY should be NO_ERROR"
+                    );
+                }
                 Some(Err(e)) => return Poll::Ready(Err(e.into())),
                 None => (),
             }
@@ -317,23 +316,23 @@ where
                 Some(Ok(Headers(frame))) => {
                     log::trace!("recv HEADERS; frame={:?}", frame);
                     self.streams.recv_headers(frame)?;
-                },
+                }
                 Some(Ok(Data(frame))) => {
                     log::trace!("recv DATA; frame={:?}", frame);
                     self.streams.recv_data(frame)?;
-                },
+                }
                 Some(Ok(Reset(frame))) => {
                     log::trace!("recv RST_STREAM; frame={:?}", frame);
                     self.streams.recv_reset(frame)?;
-                },
+                }
                 Some(Ok(PushPromise(frame))) => {
                     log::trace!("recv PUSH_PROMISE; frame={:?}", frame);
                     self.streams.recv_push_promise(frame)?;
-                },
+                }
                 Some(Ok(Settings(frame))) => {
                     log::trace!("recv SETTINGS; frame={:?}", frame);
                     self.settings.recv_settings(frame);
-                },
+                }
                 Some(Ok(GoAway(frame))) => {
                     log::trace!("recv GOAWAY; frame={:?}", frame);
                     // This should prevent starting new streams,
@@ -342,7 +341,7 @@ where
                     // transition to GoAway.
                     self.streams.recv_go_away(&frame)?;
                     self.error = Some(frame.reason());
-                },
+                }
                 Some(Ok(Ping(frame))) => {
                     log::trace!("recv PING; frame={:?}", frame);
                     let status = self.ping_pong.recv_ping(frame);
@@ -355,22 +354,21 @@ where
                         let last_processed_id = self.streams.last_processed_id();
                         self.go_away(last_processed_id, Reason::NO_ERROR);
                     }
-                },
+                }
                 Some(Ok(WindowUpdate(frame))) => {
                     log::trace!("recv WINDOW_UPDATE; frame={:?}", frame);
                     self.streams.recv_window_update(frame)?;
-                },
+                }
                 Some(Ok(Priority(frame))) => {
                     log::trace!("recv PRIORITY; frame={:?}", frame);
                     // TODO: handle
-                },
+                }
                 Some(Err(e)) => return Poll::Ready(Err(e)),
                 None => {
                     log::trace!("codec closed");
-                    self.streams.recv_eof(false)
-                        .ok().expect("mutex poisoned");
+                    self.streams.recv_eof(false).ok().expect("mutex poisoned");
                     return Poll::Ready(Ok(()));
-                },
+                }
             }
         }
     }

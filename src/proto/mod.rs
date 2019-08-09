@@ -8,10 +8,10 @@ mod streams;
 
 pub(crate) use self::connection::{Config, Connection};
 pub(crate) use self::error::Error;
-pub(crate) use self::peer::{Peer, Dyn as DynPeer};
+pub(crate) use self::peer::{Dyn as DynPeer, Peer};
 pub(crate) use self::ping_pong::UserPings;
-pub(crate) use self::streams::{StreamRef, OpaqueStreamRef, Streams};
-pub(crate) use self::streams::{PollReset, Prioritized, Open};
+pub(crate) use self::streams::{OpaqueStreamRef, StreamRef, Streams};
+pub(crate) use self::streams::{Open, PollReset, Prioritized};
 
 use crate::codec::Codec;
 

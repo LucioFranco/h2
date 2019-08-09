@@ -168,7 +168,11 @@ impl Decoder {
     }
 
     /// Decodes the headers found in the given buffer.
-    pub fn decode<F>(&mut self, src: &mut Cursor<&mut BytesMut>, mut f: F) -> Result<(), DecoderError>
+    pub fn decode<F>(
+        &mut self,
+        src: &mut Cursor<&mut BytesMut>,
+        mut f: F,
+    ) -> Result<(), DecoderError>
     where
         F: FnMut(Header),
     {
@@ -193,7 +197,7 @@ impl Decoder {
                     let entry = self.decode_indexed(src)?;
                     consume(src);
                     f(entry);
-                },
+                }
                 LiteralWithIndexing => {
                     log::trace!("    LiteralWithIndexing; rem={:?}", src.remaining());
                     can_resize = false;
@@ -204,14 +208,14 @@ impl Decoder {
                     consume(src);
 
                     f(entry);
-                },
+                }
                 LiteralWithoutIndexing => {
                     log::trace!("    LiteralWithoutIndexing; rem={:?}", src.remaining());
                     can_resize = false;
                     let entry = self.decode_literal(src, false)?;
                     consume(src);
                     f(entry);
-                },
+                }
                 LiteralNeverIndexed => {
                     log::trace!("    LiteralNeverIndexed; rem={:?}", src.remaining());
                     can_resize = false;
@@ -221,7 +225,7 @@ impl Decoder {
                     // TODO: Track that this should never be indexed
 
                     f(entry);
-                },
+                }
                 SizeUpdate => {
                     log::trace!("    SizeUpdate; rem={:?}", src.remaining());
                     if !can_resize {
@@ -231,7 +235,7 @@ impl Decoder {
                     // Handle the dynamic table size update
                     self.process_size_update(src)?;
                     consume(src);
-                },
+                }
             }
         }
 
@@ -516,7 +520,7 @@ impl Table {
                         // Can never happen as the size of the table must reach
                         // 0 by the time we've exhausted all elements.
                         panic!("Size of table != 0, but no headers left!");
-                    },
+                    }
                 };
 
                 self.size -= last.len();
@@ -827,15 +831,20 @@ mod test {
         let mut buf = buf.into();
 
         let mut res = vec![];
-        let _ = de.decode(&mut Cursor::new(&mut buf), |h| {
-            res.push(h);
-        }).unwrap();
+        let _ = de
+            .decode(&mut Cursor::new(&mut buf), |h| {
+                res.push(h);
+            })
+            .unwrap();
 
         assert_eq!(res.len(), 1);
         assert_eq!(de.table.size(), 0);
 
         match res[0] {
-            Header::Field { ref name, ref value } => {
+            Header::Field {
+                ref name,
+                ref value,
+            } => {
                 assert_eq!(name, "foo");
                 assert_eq!(value, "bar");
             }

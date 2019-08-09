@@ -1,7 +1,7 @@
 use crate::codec::RecvError;
 use crate::frame;
 use crate::proto::*;
-use std::task::{Poll, Context};
+use std::task::{Context, Poll};
 
 #[derive(Debug)]
 pub(crate) struct Settings {
@@ -13,9 +13,7 @@ pub(crate) struct Settings {
 
 impl Settings {
     pub fn new() -> Self {
-        Settings {
-            pending: None,
-        }
+        Settings { pending: None }
     }
 
     pub fn recv_settings(&mut self, frame: frame::Settings) {

@@ -3,11 +3,11 @@ use crate::frame::Ping;
 use crate::proto::{self, PingPayload};
 
 use bytes::Buf;
-use std::task::{Context, Poll};
 use futures::task::AtomicWaker;
 use std::io;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::task::{Context, Poll};
 use tokio::io::AsyncWrite;
 
 /// Acknowledges ping requests from the remote.
@@ -135,7 +135,11 @@ impl PingPong {
     }
 
     /// Send any pending pongs.
-    pub(crate) fn send_pending_pong<T, B>(&mut self, cx: &mut Context, dst: &mut Codec<T, B>) -> Poll<io::Result<()>>
+    pub(crate) fn send_pending_pong<T, B>(
+        &mut self,
+        cx: &mut Context,
+        dst: &mut Codec<T, B>,
+    ) -> Poll<io::Result<()>>
     where
         T: AsyncWrite + Unpin,
         B: Buf + Unpin,
@@ -154,7 +158,11 @@ impl PingPong {
     }
 
     /// Send any pending pings.
-    pub(crate) fn send_pending_ping<T, B>(&mut self, cx: &mut Context, dst: &mut Codec<T, B>) -> Poll<io::Result<()>>
+    pub(crate) fn send_pending_ping<T, B>(
+        &mut self,
+        cx: &mut Context,
+        dst: &mut Codec<T, B>,
+    ) -> Poll<io::Result<()>>
     where
         T: AsyncWrite + Unpin,
         B: Buf + Unpin,
@@ -177,7 +185,10 @@ impl PingPong {
 
                 dst.buffer(Ping::new(Ping::USER).into())
                     .expect("invalid ping frame");
-                users.0.state.store(USER_STATE_PENDING_PONG, Ordering::Release);
+                users
+                    .0
+                    .state
+                    .store(USER_STATE_PENDING_PONG, Ordering::Release);
             } else {
                 users.0.ping_task.register(cx.waker());
             }
@@ -201,7 +212,7 @@ impl ReceivedPing {
 impl UserPings {
     pub(crate) fn send_ping(&self) -> Result<(), Option<proto::Error>> {
         let prev = self.0.state.compare_and_swap(
-            USER_STATE_EMPTY, // current
+            USER_STATE_EMPTY,        // current
             USER_STATE_PENDING_PING, // new
             Ordering::AcqRel,
         );
@@ -210,10 +221,8 @@ impl UserPings {
             USER_STATE_EMPTY => {
                 self.0.ping_task.wake();
                 Ok(())
-            },
-            USER_STATE_CLOSED => {
-                Err(Some(broken_pipe().into()))
             }
+            USER_STATE_CLOSED => Err(Some(broken_pipe().into())),
             _ => {
                 // Was already pending, user error!
                 Err(None)
@@ -227,7 +236,7 @@ impl UserPings {
         self.0.pong_task.register(cx.waker());
         let prev = self.0.state.compare_and_swap(
             USER_STATE_RECEIVED_PONG, // current
-            USER_STATE_EMPTY, // new
+            USER_STATE_EMPTY,         // new
             Ordering::AcqRel,
         );
 
@@ -244,7 +253,7 @@ impl UserPings {
 impl UserPingsRx {
     fn receive_pong(&self) -> bool {
         let prev = self.0.state.compare_and_swap(
-            USER_STATE_PENDING_PONG, // current
+            USER_STATE_PENDING_PONG,  // current
             USER_STATE_RECEIVED_PONG, // new
             Ordering::AcqRel,
         );
